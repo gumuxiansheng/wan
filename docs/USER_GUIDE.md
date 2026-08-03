@@ -17,9 +17,10 @@
 10. [输出与日志](#10-输出与日志)
 11. [退出码](#11-退出码)
 12. [命令行参考](#12-命令行参考)
-13. [与 CI 集成](#13-与-ci-集成)
-14. [故障排查](#14-故障排查)
-15. [限制](#15-限制)
+13. [Git Hook 集成](#13-git-hook-集成)
+14. [与 CI 集成](#14-与-ci-集成)
+15. [故障排查](#15-故障排查)
+16. [限制](#16-限制)
 
 ---
 
@@ -461,6 +462,9 @@ wan run <name> [--json] [--max-parallel N] [--quiet] [--no-color] [-C <dir>]
 wan validate <name> [-C <dir>]
 wan list [-C <dir>]
 wan graph <name> [-C <dir>]
+wan hook install <hook-type> <workflow> [--force] [-C <dir>]
+wan hook remove <hook-type> [--force] [-C <dir>]
+wan hook list [-C <dir>]
 wan --version
 wan --help
 ```
@@ -471,6 +475,9 @@ wan --help
 | `validate <name>` | 只做 schema + DAG 校验（含环检测、平台 shell 检查），不执行。短名解析规则同 `run` |
 | `list` | 列出 `.wan/workflows/` 下的 workflow；目录不存在时列当前目录的 `.yml/.yaml` |
 | `graph <name>` | 输出 mermaid `flowchart` 文本。短名解析规则同 `run` |
+| `hook install` | 安装 git hook，见[第 13 节](#13-git-hook-集成) |
+| `hook remove` | 删除 git hook |
+| `hook list` | 列出已安装的 wan-managed hook |
 | `--version` / `--help` | 版本与帮助 |
 
 | 参数 | 作用 |
@@ -481,7 +488,86 @@ wan --help
 | `--no-color` | 禁用 ANSI 颜色 |
 | `-C <dir>` | step 工作目录基准（working-directory 继承链的根），并作为相对路径解析基准 |
 
-## 13. 与 CI 集成
+## 13. Git Hook 集成
+
+`wan hook` 子命令将 workflow 绑定到 git 事件，实现 commit / push 等操作时自动触发流水线。
+
+### 13.1 命令
+
+```
+wan hook install <hook-type> <workflow> [--force] [-C <dir>]
+wan hook remove <hook-type> [--force] [-C <dir>]
+wan hook list [-C <dir>]
+```
+
+### 13.2 支持的 hook 类型
+
+| hook 类型 | 触发时机 | 典型用途 |
+|---|---|---|
+| `pre-commit` | `git commit` 之前 | 代码风格检查、静态分析 |
+| `pre-push` | `git push` 之前 | 运行测试、阻止推送未通过的代码 |
+| `post-commit` | `git commit` 之后 | 通知、生成 changelog |
+| `post-merge` | `git merge` 之后 | 依赖更新、重建索引 |
+| `post-checkout` | `git checkout` 之后 | 切换分支后自动配置环境 |
+
+### 13.3 安装
+
+```console
+$ wan hook install pre-commit lint
+installed: pre-commit -> lint
+```
+
+生成的 hook 脚本（位于 `.git/hooks/pre-commit`）：
+
+```sh
+#!/bin/sh
+# wan-managed: pre-commit -> lint
+exec wan run lint --quiet "$@"
+```
+
+- wan 在 `.git/hooks/` 目录下生成三行脚本，直接调用 `wan run <workflow> --quiet`
+- **退出码直接传播**：wan 失败 → hook 返回非零 → git 阻止操作
+- `-C <dir>` 指定工作目录（默认当前目录），wan 从该目录向上查找 `.git`
+
+### 13.4 幂等与安全
+
+- **wan-managed hook**（含 `# wan-managed:` 标记行）：`install` 直接覆盖，`remove` 直接删除
+- **非 wan hook**（已存在但不带标记）：
+  - `install` 拒绝覆盖，报错退出（退出码 2）
+  - 加 `--force` 强制覆盖，原文件自动备份为 `.bak`
+  - `remove` 同理拒绝删除，需 `--force`
+
+```console
+$ wan hook install pre-commit lint
+error: pre-commit 已存在且非 wan 管理，拒绝覆盖（使用 --force 强制，原文件备份为 .bak）
+
+$ wan hook install pre-commit lint --force
+installed: pre-commit -> lint (backed up to .git/hooks/pre-commit.bak)
+```
+
+### 13.5 列出已安装 hook
+
+```console
+$ wan hook list
+pre-commit     -> lint
+post-merge     -> rebuild
+```
+
+仅列出 wan 管理的 hook（非 wan 的 hook 不显示）。无 hook 时输出 `（无 wan-managed hook）`。
+
+### 13.6 worktree 支持
+
+`find_git_dir` 支持 git worktree：当 `.git` 是文件（而非目录）时，读取其中的 `gitdir:` 指针并解析到真实 hooks 目录。在 worktree 中安装的 hook 对主仓库生效。
+
+### 13.7 与 cron 的关系
+
+- **hook**：事件驱动（commit / push 等git 操作触发）
+- **cron**（v0.2 计划）：时间驱动（定时执行）
+- 两者互补，可组合使用
+
+---
+
+## 14. 与 CI 集成
 
 `wan` 输出结构化事件与确定退出码，可嵌入任何 CI：
 
@@ -509,7 +595,7 @@ pipeline:
 - 使用 `wan run --json` 以便上游 CI 解析事件
 - 需要 runner 上具备 workflow 用到的 shell（如 Git Bash）
 
-## 14. 故障排查
+## 15. 故障排查
 
 | 现象 | 原因与处理 |
 |---|---|
@@ -523,8 +609,10 @@ pipeline:
 | 中文输出乱码 | 脚本文件为 UTF-8；cmd 会话会自动设置代码页；确保终端支持 UTF-8 |
 | `list` 显示为空 | 检查是否存在 `.wan/workflows/`；也可直接用 `run <路径>` |
 | `wan run xx` 报"未找到 workflow"（退出码 2） | 短名只查 `.wan/workflows/`。stderr 会列出已尝试的全部候选（如 `xx-win.yml`、`xx.yml`）；确认文件名或改用完整路径 |
+| `wan hook install` 报"不在 git 仓库内" | 从当前目录向上未找到 `.git`。`-C <dir>` 指定仓库根目录，或 `cd` 到仓库内 |
+| `wan hook install` 报"已存在且非 wan 管理" | hook 文件已存在但不带 wan 标记。确认后加 `--force` 覆盖（原文件备份为 `.bak`） |
 
-## 15. 限制
+## 16. 限制
 
 - `if` 仅支持 `success()` / `failure()` / `always()` / `==` / `!=`，不支持 `&&`、`!`、函数链
 - 变量插值单遍、不递归；未定义变量保留原样并警告
@@ -533,6 +621,7 @@ pipeline:
 - `bash` 在 Windows 上需要 Git Bash；WSL bash 不受支持（路径格式限制）
 - 不提供 `cron`/触发器等守护能力——`wan` 是纯执行器，调度留给操作系统或 CI
 - v0.1 面向单机；跨机器分布式编排不在范围内
+- `cron` 定时调度为 v0.2 计划；v0.1 的 `hook` 子命令仅覆盖 git 事件触发
 
 ---
 
