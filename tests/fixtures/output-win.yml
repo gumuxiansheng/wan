@@ -1,0 +1,12 @@
+version: 1
+jobs:
+  build:
+    steps:
+      - name: 产生输出
+        shell: cmd
+        run: |
+          echo VAR=from-step-1 > %WAN_OUTPUT%
+      - name: 消费输出
+        shell: cmd
+        run: |
+          echo got: %VAR%

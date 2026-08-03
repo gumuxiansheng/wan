@@ -1,0 +1,17 @@
+version: 1
+jobs:
+  a:
+    needs: [c]
+    steps:
+      - run: x
+        shell: sh
+  b:
+    needs: [a]
+    steps:
+      - run: y
+        shell: sh
+  c:
+    needs: [b]
+    steps:
+      - run: z
+        shell: sh

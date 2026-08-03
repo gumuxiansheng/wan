@@ -1,0 +1,15 @@
+version: 1
+jobs:
+  flaky:
+    steps:
+      - name: 第一次必败第二次成功
+        shell: cmd
+        run: |
+          if not exist "%TEMP%\wan-retry-marker.txt" (
+            echo creating marker > "%TEMP%\wan-retry-marker.txt"
+            exit 1
+          )
+          del "%TEMP%\wan-retry-marker.txt"
+        retry:
+          attempts: 2
+          delay: 1s

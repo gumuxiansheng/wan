@@ -1,0 +1,15 @@
+version: 1
+jobs:
+  fail:
+    steps:
+      - name: 必败 step
+        shell: sh
+        run: |
+          exit 42
+  after:
+    needs: [fail]
+    steps:
+      - name: 不应执行
+        shell: sh
+        run: |
+          echo SHOULD NOT RUN

@@ -1,0 +1,25 @@
+version: 1
+env:
+  PYTHONUTF8: "1"
+jobs:
+  build:
+    steps:
+      - name: 构建产物
+        shell: pwsh
+        run: |
+          Write-Output "building... (demo)"
+  test:
+    needs: [build]
+    steps:
+      - name: 跑测试
+        shell: pwsh
+        run: |
+          Write-Output "testing... (demo)"
+  report:
+    needs: [test]
+    if: always()
+    steps:
+      - name: 汇总
+        shell: pwsh
+        run: |
+          Write-Output "done"

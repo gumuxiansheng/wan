@@ -1,0 +1,9 @@
+version: 1
+jobs:
+  minimal:
+    steps:
+      - name: 空脚本
+        shell: cmd
+        run: |
+          @echo off
+          rem no-op

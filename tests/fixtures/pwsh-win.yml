@@ -1,0 +1,38 @@
+version: 1
+env:
+  REGION: cn-north
+jobs:
+  pwshjob:
+    steps:
+      - name: pwsh 冒烟
+        shell: pwsh
+        run: |
+          Write-Output "hello from pwsh $(whoami), region=$env:REGION"
+      - name: 产生输出
+        shell: pwsh
+        run: |
+          $v = (Get-Date).Second
+          "ver=$v" | Out-File -FilePath $env:WAN_OUTPUT -Encoding utf8
+      - name: 消费输出
+        shell: pwsh
+        run: |
+          if (-not $env:ver) { throw "WAN_OUTPUT 未注入" }
+          Write-Output "got ver=$env:ver"
+      - name: 失败重试
+        shell: pwsh
+        run: |
+          $m = "$env:TEMP\wan-pwsh-retry.txt"
+          if (-not (Test-Path $m)) { New-Item -ItemType File -Path $m | Out-Null; exit 1 }
+          Remove-Item $m
+          Write-Output "second try ok"
+        retry:
+          attempts: 2
+          delay: 1s
+  report:
+    needs: [pwshjob]
+    if: always()
+    steps:
+      - name: 汇总报告
+        shell: pwsh
+        run: |
+          Write-Output "report job ran, REGION=$env:REGION"

@@ -1,0 +1,20 @@
+version: 1
+env:
+  WHO: wan
+jobs:
+  bashjob:
+    steps:
+      - name: bash 冒烟
+        shell: bash
+        run: |
+          echo "hello from bash, $WHO"
+      - name: bash 失败传播
+        shell: bash
+        run: |
+          echo before-fail
+          exit 7
+        continue-on-error: true
+      - name: 继续执行
+        shell: bash
+        run: |
+          echo still-running

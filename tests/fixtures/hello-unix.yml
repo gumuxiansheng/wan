@@ -1,0 +1,10 @@
+version: 1
+env:
+  WHO: wan
+jobs:
+  hello:
+    steps:
+      - name: sh 冒烟
+        shell: sh
+        run: |
+          echo "hello from sh, $WHO"

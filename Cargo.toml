@@ -1,0 +1,39 @@
+[package]
+name = "wan"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+saphyr-parser = "0.0.11"
+lexopt = "0.3"
+jiff = { version = "0.2", default-features = false, features = ["std", "serde"] }
+anstyle = "1"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_Security",
+]}
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.release-fast]
+inherits = "release"
+opt-level = 2
+lto = false
+codegen-units = 16
+panic = "unwind"

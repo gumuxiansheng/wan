@@ -1,0 +1,10 @@
+version: 1
+env:
+  WHO: wan
+jobs:
+  hello:
+    steps:
+      - name: cmd 冒烟
+        shell: cmd
+        run: |
+          echo hello from cmd, %WHO%

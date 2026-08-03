@@ -1,0 +1,18 @@
+version: 1
+env:
+  WHO: wan
+jobs:
+  greet:
+    steps:
+      - name: pwsh 冒烟
+        shell: pwsh
+        run: |
+          Write-Output "hello from pwsh, $env:WHO"
+      - name: cmd 冒烟
+        shell: cmd
+        run: |
+          echo hello from cmd, %WHO%
+      - name: bash 冒烟
+        shell: bash
+        run: |
+          echo "hello from bash, $WHO"

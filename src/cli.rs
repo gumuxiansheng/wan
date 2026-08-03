@@ -1,0 +1,394 @@
+﻿//! CLI 层（spec §7）：薄壳，仅参数解析与退出码
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use lexopt::prelude::*;
+
+use crate::error::{Error, Result};
+use crate::engine;
+use crate::model::RunOptions;
+use crate::output::{HumanSink, JsonSink};
+use crate::parser::load_file;
+
+const USAGE: &str = "\
+wan — 本地工作流执行器
+
+用法:
+  wan run <file|name> [--json] [--max-parallel N] [--quiet] [--no-color] [-C <dir>]
+  wan validate <file|name> [-C <dir>]
+  wan list [-C <dir>]
+  wan graph <file|name> [-C <dir>]
+  wan --version
+  wan --help
+
+命令:
+  run        执行一个 workflow 文件
+  validate   仅校验 schema 与 DAG，不执行
+  list       列出 .wan/workflows/ 目录下所有 workflow（无此目录时列当前目录 yml/yaml）
+  graph      输出 mermaid 文本
+  --version  打印版本
+  --help     打印本帮助
+
+<file|name>: 含路径分隔符按文件路径处理；否则按短名在 .wan/workflows/ 下查找，
+             自动匹配平台后缀（Windows: {name}-win.yml；Linux: {name}-unix.yml），
+             无平台后缀文件时回退 {name}.yml/.yaml，均无则报错。
+
+全局参数:
+  --json            结构化事件流（每行一个 JSON）
+  --max-parallel N  job 并行上限（默认无上限）
+  --quiet           抑制 step 输出（与 --json 同用时无效）
+  --no-color        禁用颜色
+  -C <dir>          step 工作目录（默认当前目录）
+
+退出码: 0 成功 / 1 执行失败 / 2 配置错误 / 130 中断
+";
+
+fn print_version() {
+    println!("wan {}", env!("CARGO_PKG_VERSION"));
+}
+
+fn report_error(e: &Error) {
+    match (e.line, e.col) {
+        (Some(l), Some(c)) => eprintln!("error: {}:{}:{}", e.msg, l, c),
+        _ => eprintln!("error: {e}"),
+    }
+}
+
+struct Flags {
+    json: bool,
+    quiet: bool,
+    color: bool,
+    max_parallel: Option<usize>,
+    cwd: Option<PathBuf>,
+}
+
+impl Default for Flags {
+    fn default() -> Self {
+        Flags {
+            json: false,
+            quiet: false,
+            color: true,
+            max_parallel: None,
+            cwd: None,
+        }
+    }
+}
+
+fn take_value(parser: &mut lexopt::Parser, flag: &str) -> Result<OsString> {
+    parser
+        .value()
+        .map_err(|_| Error::config(format!("参数 `{flag}` 缺少值")))
+}
+
+pub fn run_main() -> i32 {
+    crate::platform::install_interrupt_handler();
+    crate::platform::setup_utf8_console();
+    // 注意：lexopt from_iter 会把第一个元素当作程序名，需传入 argv[0]
+    let args: Vec<OsString> = std::env::args_os().collect();
+    match dispatch(args) {
+        Ok(code) => code,
+        Err(e) => {
+            report_error(&e);
+            e.exit_code()
+        }
+    }
+}
+
+fn dispatch(args: Vec<OsString>) -> Result<i32> {
+    let mut parser = lexopt::Parser::from_iter(args);
+    let cmd = match parser.next()? {
+        Some(Long("help")) => return Ok(print_help()),
+        Some(Short('h')) => return Ok(print_help()),
+        Some(Long("version")) => {
+            print_version();
+            return Ok(0);
+        }
+        Some(Value(s)) => s.to_string_lossy().to_string(),
+        Some(Short(_)) | Some(Long(_)) => {
+            return Err(Error::config("未知选项，`wan --help` 查看用法"))
+        }
+        None => return Ok(print_help()),
+    };
+
+    match cmd.as_str() {
+        "run" => cmd_run(parser),
+        "validate" => cmd_validate(parser),
+        "list" => cmd_list(parser),
+        "graph" => cmd_graph(parser),
+        "help" => Ok(print_help()),
+        _ => Err(Error::config(format!("未知命令 `{cmd}`，`wan --help` 查看用法"))),
+    }
+}
+
+fn print_help() -> i32 {
+    print!("{USAGE}");
+    0
+}
+
+/// 解析 <file> 参数：含路径分隔符视为路径；否则按短名在 .wan/workflows/
+/// 下做平台后缀解析（§7.4）：`{name}-{win|unix}.{yml|yaml}` → `{name}.{yml|yaml}`
+fn resolve_workflow_file(arg: &str, base: &Path) -> Result<PathBuf> {
+    if arg.contains('/') || arg.contains('\\') {
+        let p = PathBuf::from(arg);
+        return if p.is_file() {
+            Ok(p)
+        } else {
+            Err(Error::config(format!("找不到文件：{}", p.display())))
+        };
+    }
+
+    let wf_dir = base.join(".wan").join("workflows");
+    if !wf_dir.is_dir() {
+        return Err(Error::config(format!(
+            "目录 {} 不存在，无法按短名查找 workflow `{arg}`；请提供完整路径",
+            wf_dir.display()
+        )));
+    }
+
+    let stem = Path::new(arg)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| arg.to_string());
+    let platform = if cfg!(windows) { "win" } else { "unix" };
+    let mut candidates = Vec::new();
+    for ext in ["yml", "yaml"] {
+        candidates.push(format!("{stem}-{platform}.{ext}"));
+    }
+    for ext in ["yml", "yaml"] {
+        candidates.push(format!("{stem}.{ext}"));
+    }
+    for c in &candidates {
+        let p = wf_dir.join(c);
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+    Err(Error::config(format!(
+        "在 {} 下未找到 workflow `{stem}`（已尝试：{}）",
+        wf_dir.display(),
+        candidates.join("、")
+    )))
+}
+
+fn parse_common_flags(parser: &mut lexopt::Parser, flags: &mut Flags) -> Result<Option<PathBuf>> {
+    let mut file: Option<PathBuf> = None;
+    while let Some(arg) = parser.next()? {
+        match arg {
+            Long("json") => flags.json = true,
+            Long("quiet") => flags.quiet = true,
+            Long("no-color") => flags.color = false,
+            Short('C') => {
+                let v = take_value(parser, "-C")?;
+                let p = PathBuf::from(v);
+                flags.cwd = if p.is_absolute() {
+                    Some(p)
+                } else {
+                    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    Some(base.join(p))
+                };
+            }
+            Long("max-parallel") => {
+                let v = take_value(parser, "--max-parallel")?;
+                let n: usize = v
+                    .to_string_lossy()
+                    .parse()
+                    .map_err(|_| Error::config("`--max-parallel` 需要正整数"))?;
+                if n == 0 {
+                    return Err(Error::config("`--max-parallel` 需要 >= 1"));
+                }
+                flags.max_parallel = Some(n);
+            }
+            Value(p) => {
+                if file.is_some() {
+                    return Err(Error::config("多余的位置参数"));
+                }
+                file = Some(PathBuf::from(p));
+            }
+            Short(_) | Long(_) => {
+                return Err(Error::config("未知选项，`wan --help` 查看用法".to_string()))
+            }
+        }
+    }
+    Ok(file)
+}
+
+fn cmd_run(parser: lexopt::Parser) -> Result<i32> {
+    let mut flags = Flags::default();
+    let mut parser = parser;
+    let file = parse_common_flags(&mut parser, &mut flags)?
+        .ok_or_else(|| Error::config("`wan run` 需要 <file> 参数"))?;
+    let base = flags.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let path = resolve_workflow_file(&file.to_string_lossy(), &base)?;
+
+    let wf = load_file(&path)?;
+    engine::validate(&wf)?;
+
+    let opts = RunOptions {
+        max_parallel: flags.max_parallel,
+        working_dir: flags.cwd.clone(),
+        json_output: flags.json,
+        quiet: flags.quiet,
+        color: flags.color,
+    };
+
+    let sink: Box<dyn crate::model::EventSink + Send> = if flags.json {
+        Box::new(JsonSink::new(std::io::stdout()))
+    } else {
+        Box::new(HumanSink::new(&opts))
+    };
+
+    engine::run(&wf, &opts, sink)
+}
+
+fn cmd_validate(parser: lexopt::Parser) -> Result<i32> {
+    let mut flags = Flags::default();
+    let mut parser = parser;
+    let file = parse_common_flags(&mut parser, &mut flags)?
+        .ok_or_else(|| Error::config("`wan validate` 需要 <file> 参数"))?;
+    let base = flags.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let path = resolve_workflow_file(&file.to_string_lossy(), &base)?;
+
+    let wf = load_file(&path)?;
+    engine::validate(&wf)?;
+    println!("OK: {} 校验通过（{} job, DAG 无环）", path.display(), wf.jobs.len());
+    Ok(0)
+}
+
+fn cmd_list(parser: lexopt::Parser) -> Result<i32> {
+    let mut flags = Flags::default();
+    let mut parser = parser;
+    let _file = parse_common_flags(&mut parser, &mut flags)?;
+
+    let dir = flags.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let wf_dir = dir.join(".wan").join("workflows");
+    let search_dir = if wf_dir.is_dir() { wf_dir } else { dir };
+
+    let mut found: Vec<String> = Vec::new();
+    if let Ok(entries) = std::fs::read_dir(&search_dir) {
+        for e in entries.flatten() {
+            let p = e.path();
+            let is_wf = matches!(
+                p.extension().and_then(|x| x.to_str()),
+                Some("yml") | Some("yaml")
+            );
+            if p.is_file() && is_wf {
+                if let Some(stem) = p.file_stem() {
+                    found.push(stem.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+    found.sort();
+    for name in found {
+        println!("{name}");
+    }
+    Ok(0)
+}
+
+fn cmd_graph(parser: lexopt::Parser) -> Result<i32> {
+    let mut flags = Flags::default();
+    let mut parser = parser;
+    let file = parse_common_flags(&mut parser, &mut flags)?
+        .ok_or_else(|| Error::config("`wan graph` 需要 <file> 参数"))?;
+    let base = flags.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let path = resolve_workflow_file(&file.to_string_lossy(), &base)?;
+
+    let wf = load_file(&path)?;
+    engine::validate(&wf)?;
+
+    println!("flowchart TD");
+    for job in &wf.jobs {
+        println!("  {}", job.id);
+        for need in &job.needs {
+            println!("  {need} --> {}", job.id);
+        }
+    }
+    Ok(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn common_flags_parse() {
+        let mut parser = lexopt::Parser::from_iter(vec![
+            "wan".to_string(),
+            "--json".to_string(),
+            "-C".to_string(),
+            ".".to_string(),
+            "a.yml".to_string(),
+        ]);
+        let mut flags = Flags::default();
+        let file = parse_common_flags(&mut parser, &mut flags).unwrap();
+        assert!(flags.json, "json flag not set");
+        let cwd = flags.cwd.expect("cwd should be set");
+        assert!(cwd.to_string_lossy().ends_with('.'), "cwd: {}", cwd.display());
+        assert_eq!(file, Some(PathBuf::from("a.yml")));
+    }
+
+    fn make_tmp_workflows() -> PathBuf {
+        use std::sync::LazyLock;
+        static DIR: LazyLock<PathBuf> = LazyLock::new(|| {
+            let dir = std::env::temp_dir().join(format!("wan-cli-test-{}", std::process::id()));
+            let wf = dir.join(".wan").join("workflows");
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&wf).unwrap();
+            let win = "version: 1\njobs:\n  a:\n    steps:\n      - name: x\n        shell: cmd\n        run: echo win\n";
+            let unix = "version: 1\njobs:\n  a:\n    steps:\n      - name: x\n        shell: sh\n        run: echo unix\n";
+            let plain = "version: 1\njobs:\n  a:\n    steps:\n      - name: x\n        shell: sh\n        run: echo plain\n";
+            std::fs::write(wf.join("hello-win.yml"), win).unwrap();
+            std::fs::write(wf.join("hello-unix.yml"), unix).unwrap();
+            std::fs::write(wf.join("plain.yml"), plain).unwrap();
+            dir
+        });
+        DIR.clone()
+    }
+
+    #[test]
+    fn resolve_platform_prefers_suffix() {
+        let dir = make_tmp_workflows();
+        let p = resolve_workflow_file("hello", &dir).unwrap();
+        let name = p.file_name().unwrap().to_string_lossy().into_owned();
+        let expected = if cfg!(windows) { "hello-win.yml" } else { "hello-unix.yml" };
+        assert_eq!(name, expected, "平台后缀未优先");
+    }
+
+    #[test]
+    fn resolve_falls_back_to_plain() {
+        let dir = make_tmp_workflows();
+        let p = resolve_workflow_file("plain", &dir).unwrap();
+        assert_eq!(p.file_name().unwrap().to_string_lossy(), "plain.yml");
+    }
+
+    #[test]
+    fn resolve_strips_extension() {
+        let dir = make_tmp_workflows();
+        let p = resolve_workflow_file("hello.yml", &dir).unwrap();
+        assert!(p.to_string_lossy().contains("hello-"), "应解析为平台后缀文件: {}", p.display());
+    }
+
+    #[test]
+    fn resolve_path_argument() {
+        let dir = make_tmp_workflows();
+        let direct = dir.join(".wan").join("workflows").join("hello-win.yml");
+        let p = resolve_workflow_file(&direct.to_string_lossy(), &dir).unwrap();
+        assert_eq!(p, direct);
+    }
+
+    #[test]
+    fn resolve_missing_name_reports_candidates() {
+        let dir = make_tmp_workflows();
+        let e = resolve_workflow_file("nope", &dir).unwrap_err();
+        assert!(e.msg.contains("未找到"), "{e}");
+        assert!(e.msg.contains("nope-win") || e.msg.contains("nope-unix"), "{e}");
+    }
+
+    #[test]
+    fn resolve_missing_dir_reports_hint() {
+        let dir = make_tmp_workflows();
+        let p = resolve_workflow_file("hello", &dir.join("elsewhere")).unwrap_err();
+        assert!(p.msg.contains("workflows"), "{p}");
+    }
+}
