@@ -9,3 +9,4 @@ pub mod parser;
 pub mod platform;
 pub mod scheduler;
 pub mod shell;
+pub mod hook;

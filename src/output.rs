@@ -117,6 +117,13 @@ pub struct CapturingSink {
 }
 
 #[allow(dead_code)]
+impl Default for CapturingSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[allow(dead_code)]
 impl CapturingSink {
     pub fn new() -> Self {
         CapturingSink { events: Vec::new() }

@@ -161,7 +161,7 @@ fn short_name_resolution() {
             "version: 1\njobs:\n  a:\n    steps:\n      - name: x\n        shell: {shell}\n        run: echo {mark}\n"
         )
     };
-    let (plat_shell, unix_shell) = if cfg!(windows) { ("cmd", "sh") } else { ("sh", "sh") };
+    let (plat_shell, _unix_shell) = if cfg!(windows) { ("cmd", "sh") } else { ("sh", "sh") };
     std::fs::write(wf_dir.join("short-win.yml"), content("cmd", "win-ran")).unwrap();
     std::fs::write(wf_dir.join("short-unix.yml"), content("sh", "unix-ran")).unwrap();
     std::fs::write(wf_dir.join("plain.yml"), content(plat_shell, "plain-ran")).unwrap();

@@ -19,16 +19,22 @@ wan — 本地工作流执行器
   wan validate <file|name> [-C <dir>]
   wan list [-C <dir>]
   wan graph <file|name> [-C <dir>]
+  wan hook install <hook-type> <workflow> [-C <dir>] [--force]
+  wan hook remove <hook-type> [-C <dir>] [--force]
+  wan hook list [-C <dir>]
   wan --version
   wan --help
 
 命令:
-  run        执行一个 workflow 文件
-  validate   仅校验 schema 与 DAG，不执行
-  list       列出 .wan/workflows/ 目录下所有 workflow（无此目录时列当前目录 yml/yaml）
-  graph      输出 mermaid 文本
-  --version  打印版本
-  --help     打印本帮助
+  run          执行一个 workflow 文件
+  validate     仅校验 schema 与 DAG，不执行
+  list         列出 .wan/workflows/ 目录下所有 workflow
+  graph        输出 mermaid 文本
+  hook         管理 git hook（安装/删除/列出）
+  --version    打印版本
+  --help       打印本帮助
+
+<hook-type>: pre-commit / pre-push / post-commit / post-merge / post-checkout
 
 <file|name>: 含路径分隔符按文件路径处理；否则按短名在 .wan/workflows/ 下查找，
              自动匹配平台后缀（Windows: {name}-win.yml；Linux: {name}-unix.yml），
@@ -39,7 +45,7 @@ wan — 本地工作流执行器
   --max-parallel N  job 并行上限（默认无上限）
   --quiet           抑制 step 输出（与 --json 同用时无效）
   --no-color        禁用颜色
-  -C <dir>          step 工作目录（默认当前目录）
+  -C <dir>          工作目录（默认当前目录）
 
 退出码: 0 成功 / 1 执行失败 / 2 配置错误 / 130 中断
 ";
@@ -116,6 +122,7 @@ fn dispatch(args: Vec<OsString>) -> Result<i32> {
         "validate" => cmd_validate(parser),
         "list" => cmd_list(parser),
         "graph" => cmd_graph(parser),
+        "hook" => cmd_hook(parser),
         "help" => Ok(print_help()),
         _ => Err(Error::config(format!("未知命令 `{cmd}`，`wan --help` 查看用法"))),
     }
@@ -305,6 +312,90 @@ fn cmd_graph(parser: lexopt::Parser) -> Result<i32> {
         }
     }
     Ok(0)
+}
+
+/// wan hook install/remove/list
+fn cmd_hook(parser: lexopt::Parser) -> Result<i32> {
+    let mut parser = parser;
+    let sub = match parser.next()? {
+        Some(Value(s)) => s.to_string_lossy().to_string(),
+        Some(Long("help")) | Some(Short('h')) => {
+            println!("wan hook install <hook-type> <workflow> [-C <dir>] [--force]");
+            println!("wan hook remove <hook-type> [-C <dir>] [--force]");
+            println!("wan hook list [-C <dir>]");
+            println!();
+            println!("<hook-type>: pre-commit / pre-push / post-commit / post-merge / post-checkout");
+            return Ok(0);
+        }
+        _ => return Err(Error::config("`wan hook` 需要子命令 install / remove / list")),
+    };
+
+    // 解析公共参数 -C / --force / 位置参数
+    let mut cwd: Option<PathBuf> = None;
+    let mut force = false;
+    let mut positional: Vec<String> = Vec::new();
+
+    while let Some(arg) = parser.next()? {
+        match arg {
+            Short('C') => {
+                let v = take_value(&mut parser, "-C")?;
+                let p = PathBuf::from(v);
+                cwd = if p.is_absolute() {
+                    Some(p)
+                } else {
+                    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    Some(base.join(p))
+                };
+            }
+            Long("force") => force = true,
+            Long("no-color") => { /* hook 不产生颜色输出，忽略 */ }
+            Value(v) => positional.push(v.to_string_lossy().to_string()),
+            Short(_) | Long(_) => {
+                return Err(Error::config("未知选项，`wan hook --help` 查看用法".to_string()))
+            }
+        }
+    }
+
+    let search_dir = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let git_dir = crate::hook::find_git_dir(&search_dir).ok_or_else(|| {
+        Error::config(format!("不在 git 仓库内（从 {} 未找到 .git 目录）", search_dir.display()))
+    })?;
+
+    match sub.as_str() {
+        "install" => {
+            let hook_str = positional.first().ok_or_else(|| {
+                Error::config("`wan hook install` 需要 <hook-type> 参数")
+            })?;
+            let workflow = positional.get(1).ok_or_else(|| {
+                Error::config("`wan hook install` 需要 <workflow> 参数")
+            })?;
+            let hook_type = crate::hook::HookType::from_str(hook_str)?;
+            crate::hook::install(&git_dir, hook_type, workflow, force)?;
+            Ok(0)
+        }
+        "remove" => {
+            let hook_str = positional.first().ok_or_else(|| {
+                Error::config("`wan hook remove` 需要 <hook-type> 参数")
+            })?;
+            let hook_type = crate::hook::HookType::from_str(hook_str)?;
+            crate::hook::remove(&git_dir, hook_type, force)?;
+            Ok(0)
+        }
+        "list" => {
+            let hooks = crate::hook::list(&git_dir)?;
+            if hooks.is_empty() {
+                println!("（无 wan-managed hook）");
+            } else {
+                for h in &hooks {
+                    println!("{:<14} -> {}", h.hook_type.as_str(), h.workflow);
+                }
+            }
+            Ok(0)
+        }
+        other => Err(Error::config(format!(
+            "未知子命令 `wan hook {other}`，支持 install / remove / list"
+        ))),
+    }
 }
 
 #[cfg(test)]
