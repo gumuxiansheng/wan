@@ -305,6 +305,73 @@ pub fn run_daemon(
     Ok(0)
 }
 
+/// 单次扫描执行（供 service/schtasks 每分钟调用）
+/// 检查所有调度，执行到点的 workflow，记录历史
+pub fn run_once(base: &Path, opts: &RunOptions) -> Result<i32> {
+    let entries = list_schedules(base)?;
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let now = SystemTime::now();
+    let mut any_executed = false;
+    let mut last_exit = 0;
+
+    for entry in &entries {
+        // 检查当前时间是否匹配 cron 表达式
+        if !entry.cron.matches_now(now) {
+            continue;
+        }
+
+        // 检查最近 60 秒内是否已执行过（防止重复触发）
+        if let Ok(history) = read_history(base, 5) {
+            let recent = history.iter().rev().find(|r| r.schedule_id == entry.id);
+            if let Some(r) = recent {
+                if let Ok(ts) = r.ts.parse::<jiff::Timestamp>() {
+                    let elapsed = now.duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_secs() as i64)
+                        .unwrap_or(0) - ts.as_second();
+                    if elapsed < 60 {
+                        continue; // 60 秒内已执行过
+                    }
+                }
+            }
+        }
+
+        any_executed = true;
+        let trigger_ts = crate::model::now_rfc3339();
+        let start = Instant::now();
+
+        eprintln!("[{}] 触发执行：{}", entry.id, entry.workflow_name);
+        let exit_code = run_workflow(&entry.workflow_path, opts);
+        let duration_ms = start.elapsed().as_millis() as u64;
+
+        let record = HistoryRecord {
+            ts: crate::model::now_rfc3339(),
+            schedule_id: entry.id.clone(),
+            workflow: entry.workflow_name.clone(),
+            cron_expr: entry.cron.raw().to_string(),
+            exit_code,
+            duration_ms,
+            triggered_at: trigger_ts,
+            catch_up: false,
+        };
+
+        if let Err(e) = append_history(base, &record) {
+            eprintln!("[{}] 历史记录写入失败：{}", entry.id, e);
+        }
+
+        eprintln!("[{}] 执行完成：退出码 {}，耗时 {}ms", entry.id, exit_code, duration_ms);
+        last_exit = exit_code;
+    }
+
+    if !any_executed {
+        eprintln!("无调度到点。");
+    }
+
+    Ok(last_exit)
+}
+
 fn run_workflow(path: &Path, opts: &RunOptions) -> i32 {
     let wf = match load_file(path) {
         Ok(w) => w,

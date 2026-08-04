@@ -117,6 +117,14 @@ impl CronExpr {
         None
     }
 
+    /// 检查当前时间是否匹配（分钟粒度）
+    pub fn matches_now(&self, now: SystemTime) -> bool {
+        let secs = now.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        // 对齐到当前分钟边界
+        let minute_start = secs - (secs % 60);
+        self.matches_timestamp(minute_start)
+    }
+
     /// 检查给定 UTC 时间戳（秒）是否匹配
     fn matches_timestamp(&self, secs: u64) -> bool {
         // 转为 UTC 年月日时分

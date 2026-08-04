@@ -12,3 +12,4 @@ pub mod shell;
 pub mod hook;
 pub mod cron;
 pub mod schedule;
+pub mod service;

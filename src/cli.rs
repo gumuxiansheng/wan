@@ -26,6 +26,8 @@ wan — 本地工作流执行器
   wan schedule remove <id> [-C <dir>]
   wan schedule list [-C <dir>]
   wan schedule start [-C <dir>] [--catch-up] [--json] [--quiet] [--no-color]
+  wan schedule run-once [-C <dir>] [--json] [--quiet] [--no-color]
+  wan schedule service install|remove|status [-C <dir>]
   wan schedule history [<id>] [-C <dir>] [--limit N]
   wan --version
   wan --help
@@ -410,7 +412,7 @@ fn cmd_hook(parser: lexopt::Parser) -> Result<i32> {
     }
 }
 
-/// wan schedule add/remove/list/start/history
+/// wan schedule add/remove/list/start/run-once/service/history
 fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
     let mut parser = parser;
     let sub = match parser.next()? {
@@ -420,12 +422,14 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
             println!("wan schedule remove <id> [-C <dir>]");
             println!("wan schedule list [-C <dir>]");
             println!("wan schedule start [-C <dir>] [--catch-up] [--json] [--quiet] [--no-color]");
+            println!("wan schedule run-once [-C <dir>] [--json] [--quiet] [--no-color]");
+            println!("wan schedule service install|remove|status [-C <dir>]");
             println!("wan schedule history [<id>] [-C <dir>] [--limit N]");
             println!();
             println!("<cron-expr>: 分 时 日 月 周（如 `0 2 * * *` 每天 02:00）");
             return Ok(0);
         }
-        _ => return Err(Error::config("`wan schedule` 需要子命令 add / remove / list / start / history")),
+        _ => return Err(Error::config("`wan schedule` 需要子命令 add / remove / list / start / run-once / service / history")),
     };
 
     // 解析公共参数
@@ -535,6 +539,49 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
             };
             crate::schedule::run_daemon(&base, catch_up, None, &opts)
         }
+        "run-once" => {
+            // 供 service/schtasks 每分钟调用
+            let opts = RunOptions {
+                max_parallel: None,
+                working_dir: Some(base.clone()),
+                json_output,
+                quiet,
+                color,
+            };
+            crate::schedule::run_once(&base, &opts)
+        }
+        "service" => {
+            // wan schedule service install/remove/status
+            let sub2 = positional.first().map(|s| s.as_str()).unwrap_or("");
+            match sub2 {
+                "install" => {
+                    crate::service::install(&base)?;
+                    println!("已安装系统服务。");
+                    #[cfg(windows)]
+                    println!("Windows schtasks 任务名：WanSchedule（每分钟触发）");
+                    #[cfg(unix)]
+                    println!("systemd user unit：wan-schedule.timer（每分钟触发）");
+                    Ok(0)
+                }
+                "remove" => {
+                    crate::service::remove()?;
+                    println!("已移除系统服务。");
+                    Ok(0)
+                }
+                "status" => {
+                    let s = crate::service::status()?;
+                    println!("{s}");
+                    Ok(0)
+                }
+                "" => {
+                    eprintln!("用法: wan schedule service install|remove|status");
+                    Ok(2)
+                }
+                other => Err(Error::config(format!(
+                    "未知子命令 `wan schedule service {other}`，支持 install / remove / status"
+                ))),
+            }
+        }
         "history" => {
             let filter_id = positional.first().map(|s| s.as_str());
             let records = crate::schedule::read_history(&base, limit)?;
@@ -554,7 +601,7 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
             Ok(0)
         }
         other => Err(Error::config(format!(
-            "未知子命令 `wan schedule {other}`，支持 add / remove / list / start / history"
+            "未知子命令 `wan schedule {other}`，支持 add / remove / list / start / run-once / service / history"
         ))),
     }
 }
