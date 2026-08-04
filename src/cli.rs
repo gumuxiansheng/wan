@@ -22,6 +22,11 @@ wan — 本地工作流执行器
   wan hook install <hook-type> <workflow> [-C <dir>] [--force]
   wan hook remove <hook-type> [-C <dir>] [--force]
   wan hook list [-C <dir>]
+  wan schedule add <id> <cron-expr> <workflow> [-C <dir>]
+  wan schedule remove <id> [-C <dir>]
+  wan schedule list [-C <dir>]
+  wan schedule start [-C <dir>] [--catch-up] [--json] [--quiet] [--no-color]
+  wan schedule history [<id>] [-C <dir>] [--limit N]
   wan --version
   wan --help
 
@@ -31,6 +36,7 @@ wan — 本地工作流执行器
   list         列出 .wan/workflows/ 目录下所有 workflow
   graph        输出 mermaid 文本
   hook         管理 git hook（安装/删除/列出）
+  schedule     管理 cron 调度（添加/删除/列出/启动/历史）
   --version    打印版本
   --help       打印本帮助
 
@@ -39,6 +45,11 @@ wan — 本地工作流执行器
 <file|name>: 含路径分隔符按文件路径处理；否则按短名在 .wan/workflows/ 下查找，
              自动匹配平台后缀（Windows: {name}-win.yml；Linux: {name}-unix.yml），
              无平台后缀文件时回退 {name}.yml/.yaml，均无则报错。
+
+<cron-expr>: 标准 5 字段 cron 表达式（分 时 日 月 周），例如：
+             `0 2 * * *`    每天 02:00
+             `*/30 * * * *` 每 30 分钟
+             `0 0 * * 1`    每周一 00:00
 
 全局参数:
   --json            结构化事件流（每行一个 JSON）
@@ -123,6 +134,7 @@ fn dispatch(args: Vec<OsString>) -> Result<i32> {
         "list" => cmd_list(parser),
         "graph" => cmd_graph(parser),
         "hook" => cmd_hook(parser),
+        "schedule" => cmd_schedule(parser),
         "help" => Ok(print_help()),
         _ => Err(Error::config(format!("未知命令 `{cmd}`，`wan --help` 查看用法"))),
     }
@@ -394,6 +406,155 @@ fn cmd_hook(parser: lexopt::Parser) -> Result<i32> {
         }
         other => Err(Error::config(format!(
             "未知子命令 `wan hook {other}`，支持 install / remove / list"
+        ))),
+    }
+}
+
+/// wan schedule add/remove/list/start/history
+fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
+    let mut parser = parser;
+    let sub = match parser.next()? {
+        Some(Value(s)) => s.to_string_lossy().to_string(),
+        Some(Long("help")) | Some(Short('h')) => {
+            println!("wan schedule add <id> <cron-expr> <workflow> [-C <dir>]");
+            println!("wan schedule remove <id> [-C <dir>]");
+            println!("wan schedule list [-C <dir>]");
+            println!("wan schedule start [-C <dir>] [--catch-up] [--json] [--quiet] [--no-color]");
+            println!("wan schedule history [<id>] [-C <dir>] [--limit N]");
+            println!();
+            println!("<cron-expr>: 分 时 日 月 周（如 `0 2 * * *` 每天 02:00）");
+            return Ok(0);
+        }
+        _ => return Err(Error::config("`wan schedule` 需要子命令 add / remove / list / start / history")),
+    };
+
+    // 解析公共参数
+    let mut cwd: Option<PathBuf> = None;
+    let mut json_output = false;
+    let mut quiet = false;
+    let mut color = true;
+    let mut catch_up = false;
+    let mut limit: usize = 20;
+    let mut positional: Vec<String> = Vec::new();
+
+    while let Some(arg) = parser.next()? {
+        match arg {
+            Short('C') => {
+                let v = take_value(&mut parser, "-C")?;
+                let p = PathBuf::from(v);
+                cwd = if p.is_absolute() {
+                    Some(p)
+                } else {
+                    let base = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+                    Some(base.join(p))
+                };
+            }
+            Long("json") => json_output = true,
+            Long("quiet") => quiet = true,
+            Long("no-color") => color = false,
+            Long("catch-up") => catch_up = true,
+            Long("limit") => {
+                let v = take_value(&mut parser, "--limit")?;
+                limit = v.to_string_lossy().parse().map_err(|_| Error::config("`--limit` 需要正整数"))?;
+            }
+            Long("force") => { /* schedule 不用 force，但容忍 */ }
+            Value(v) => positional.push(v.to_string_lossy().to_string()),
+            Short(_) | Long(_) => {
+                return Err(Error::config("未知选项，`wan schedule --help` 查看用法".to_string()))
+            }
+        }
+    }
+
+    let base = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+
+    match sub.as_str() {
+        "add" => {
+            let id = positional.first().ok_or_else(|| {
+                Error::config("`wan schedule add` 需要 <id> 参数")
+            })?;
+            let cron_expr = positional.get(1).ok_or_else(|| {
+                Error::config("`wan schedule add` 需要 <cron-expr> 参数")
+            })?;
+            let workflow = positional.get(2).ok_or_else(|| {
+                Error::config("`wan schedule add` 需要 <workflow> 参数")
+            })?;
+
+            // 验证 cron 表达式
+            let _ = crate::cron::CronExpr::parse(cron_expr)?;
+
+            // 解析 workflow 路径（支持短名）
+            let wf_path = resolve_workflow_file(workflow, &base)?;
+
+            crate::schedule::add_schedule(&base, id, cron_expr, &wf_path)?;
+            println!("已添加调度：{} [{}] -> {}", id, cron_expr, wf_path.display());
+            Ok(0)
+        }
+        "remove" => {
+            let id = positional.first().ok_or_else(|| {
+                Error::config("`wan schedule remove` 需要 <id> 参数")
+            })?;
+            let removed = crate::schedule::remove_schedule(&base, id)?;
+            if removed {
+                println!("已移除调度：{}", id);
+                Ok(0)
+            } else {
+                eprintln!("未找到调度：{}", id);
+                Ok(2)
+            }
+        }
+        "list" => {
+            let entries = crate::schedule::list_schedules(&base)?;
+            if entries.is_empty() {
+                println!("（无调度条目）");
+            } else {
+                for e in &entries {
+                    // 计算下次触发时间
+                    let now = std::time::SystemTime::now();
+                    let next = e.cron.next_after(now).map(|t| {
+                        let secs = t.duration_since(std::time::UNIX_EPOCH)
+                            .map(|d| d.as_secs())
+                            .unwrap_or(0);
+                        let ts = jiff::Timestamp::from_second(secs as i64)
+                            .unwrap_or_else(|_| jiff::Timestamp::now());
+                        ts.to_string()
+                    }).unwrap_or_else(|| "不可计算".to_string());
+
+                    println!("{:<16} [{:<14}] {} -> {} (next: {})",
+                        e.id, e.cron.raw(), e.workflow_name, e.workflow_path.display(), next);
+                }
+            }
+            Ok(0)
+        }
+        "start" => {
+            let opts = RunOptions {
+                max_parallel: None,
+                working_dir: Some(base.clone()),
+                json_output,
+                quiet,
+                color,
+            };
+            crate::schedule::run_daemon(&base, catch_up, None, &opts)
+        }
+        "history" => {
+            let filter_id = positional.first().map(|s| s.as_str());
+            let records = crate::schedule::read_history(&base, limit)?;
+            let filtered: Vec<_> = match filter_id {
+                Some(id) => records.into_iter().filter(|r| r.schedule_id == id).collect(),
+                None => records,
+            };
+            if filtered.is_empty() {
+                println!("（无历史记录）");
+            } else {
+                for r in &filtered {
+                    let catchup = if r.catch_up { " (catch-up)" } else { "" };
+                    println!("{} {} [{}] {} exit={} ({}ms){}",
+                        r.ts, r.schedule_id, r.cron_expr, r.workflow, r.exit_code, r.duration_ms, catchup);
+                }
+            }
+            Ok(0)
+        }
+        other => Err(Error::config(format!(
+            "未知子命令 `wan schedule {other}`，支持 add / remove / list / start / history"
         ))),
     }
 }

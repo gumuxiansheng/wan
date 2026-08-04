@@ -55,6 +55,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<serde_json::Error> for Error {
+    fn from(e: serde_json::Error) -> Self {
+        Error::config(format!("JSON 错误：{e}"))
+    }
+}
+
 impl From<lexopt::Error> for Error {
     fn from(e: lexopt::Error) -> Self {
         Error::config(e.to_string())
