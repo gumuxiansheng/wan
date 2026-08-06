@@ -1,0 +1,76 @@
+$:
+  tag_push:
+    # ── Pipeline 1: 创建 Release + 构建 Linux x86_64 ──
+    - name: release-linux-amd64
+      runner:
+        tags: cnb:arch:amd64
+      docker:
+        image: rust:latest
+      stages:
+        - name: create release
+          type: git:release
+          options:
+            overlying: true
+            title: $CNB_BRANCH
+            description: "wan $CNB_BRANCH - 自动构建发布"
+        - name: build
+          env:
+            CARGO_TARGET_DIR: ./target-release
+          script:
+            - cargo build --release --target x86_64-unknown-linux-gnu
+            - mkdir -p ./dist
+            - cp ./target-release/x86_64-unknown-linux-gnu/release/wan ./dist/wan-linux-amd64
+        - name: upload release attachment
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "./dist/wan-linux-amd64"
+
+    # ── Pipeline 2: 构建 Linux aarch64 ──
+    - name: release-linux-arm64
+      runner:
+        tags: cnb:arch:amd64
+      docker:
+        image: rust:latest
+      stages:
+        - name: install targets and linker
+          script:
+            - rustup target add aarch64-unknown-linux-gnu
+            - apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+        - name: build
+          env:
+            CARGO_TARGET_DIR: ./target-release
+            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+          script:
+            - cargo build --release --target aarch64-unknown-linux-gnu
+            - mkdir -p ./dist
+            - cp ./target-release/aarch64-unknown-linux-gnu/release/wan ./dist/wan-linux-arm64
+        - name: upload release attachment
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "./dist/wan-linux-arm64"
+
+    # ── Pipeline 3: 构建 Windows x86_64 ──
+    - name: release-windows-amd64
+      runner:
+        tags: cnb:arch:amd64
+      docker:
+        image: rust:latest
+      stages:
+        - name: install targets and linker
+          script:
+            - rustup target add x86_64-pc-windows-gnu
+            - apt-get update && apt-get install -y mingw-w64
+        - name: build
+          env:
+            CARGO_TARGET_DIR: ./target-release
+          script:
+            - cargo build --release --target x86_64-pc-windows-gnu
+            - mkdir -p ./dist
+            - cp ./target-release/x86_64-pc-windows-gnu/release/wan.exe ./dist/wan-windows-amd64.exe
+        - name: upload release attachment
+          image: cnbcool/attachments:latest
+          settings:
+            attachments:
+              - "./dist/wan-windows-amd64.exe"
