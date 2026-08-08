@@ -155,7 +155,7 @@ fn spawn_and_wait(
     let code = loop {
         if platform::interrupted() {
             interrupted = true;
-            spawned.process.kill_tree(KillKind::Graceful);
+            spawned.process.kill_tree(KillKind::Terminate);
             let _ = wait_exited(&mut spawned);
             break CODE_INTERRUPT;
         }
@@ -175,7 +175,7 @@ fn spawn_and_wait(
                         if let Some(dl) = deadline {
                             if Instant::now() >= dl {
                                 timed_out = true;
-                                spawned.process.kill_tree(KillKind::Graceful);
+                                spawned.process.kill_tree(KillKind::Terminate);
                                 let _ = wait_exited(&mut spawned);
                                 break CODE_TIMEOUT;
                             }
@@ -212,7 +212,7 @@ fn wait_exited(spawned: &mut Spawned) -> std::io::Result<u32> {
             Ok(WaitResult::Exited(code)) => return Ok(code),
             Ok(WaitResult::TimedOut) => {
                 if grace.is_zero() {
-                    spawned.process.kill_tree(KillKind::Force);
+                    spawned.process.kill_tree(KillKind::Kill);
                     grace = Duration::from_secs(2);
                 } else {
                     grace = grace.saturating_sub(Duration::from_millis(50));

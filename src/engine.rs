@@ -35,6 +35,9 @@ pub fn run(
 ) -> Result<i32> {
     validate(workflow)?;
 
+    // 复位中断标志（库形态连续调用不残留）
+    crate::platform::set_interrupted(false);
+
     let start = Instant::now();
     let tmp_root = make_tmp_dir()?;
     let ctx = RunCtx {
@@ -80,8 +83,12 @@ pub fn run(
 
     let _ = collector.join();
 
-    // 清理临时目录（尽力而为）
-    let _ = std::fs::remove_dir_all(&tmp_root);
+    // 清理临时目录：成功时删除，失败时保留供排查
+    if code == 0 {
+        let _ = std::fs::remove_dir_all(&tmp_root);
+    } else {
+        eprintln!("临时脚本保留在：{}", tmp_root.display());
+    }
 
     Ok(code)
 }

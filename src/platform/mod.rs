@@ -26,8 +26,8 @@ pub fn interrupted() -> bool {
     INTERRUPTED.load(Ordering::Relaxed)
 }
 
-pub fn set_interrupted() {
-    INTERRUPTED.store(true, Ordering::Relaxed);
+pub fn set_interrupted(value: bool) {
+    INTERRUPTED.store(value, Ordering::Relaxed);
 }
 
 pub struct Spawned {
@@ -54,17 +54,18 @@ pub fn setup_utf8_console() {
 
 pub enum KillKind {
     /// SIGTERM（Unix）/ TerminateJobObject（Windows）
-    Graceful,
-    /// SIGKILL 兜底（Unix）；Windows 无差异
-    Force,
+    /// Windows 上无优雅终止原语，TerminateJobObject 即为最佳可用方案
+    Terminate,
+    /// SIGKILL 兜底（Unix）；Windows 上与 Terminate 相同
+    Kill,
 }
 
 impl StepProcess {
     /// 终止整个子进程树
     pub fn kill_tree(&self, kind: KillKind) {
         match kind {
-            KillKind::Graceful => self.kill_graceful(),
-            KillKind::Force => self.kill_force(),
+            KillKind::Terminate => self.kill_terminate(),
+            KillKind::Kill => self.kill_force(),
         }
     }
 

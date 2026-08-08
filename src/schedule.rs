@@ -6,8 +6,6 @@
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
 use crate::cron::CronExpr;
@@ -194,14 +192,8 @@ pub fn run_daemon(
         .map(|e| e.cron.next_after(now))
         .collect();
 
-    let stop = Arc::new(AtomicBool::new(false));
-
     // 安装信号处理
     crate::platform::install_interrupt_handler();
-
-    let stop_clone = Arc::clone(&stop);
-    // 信号处理通过 platform 的 INTERRUPTED flag
-    // 主循环检查 stop flag
 
     eprintln!("wan 调度器已启动（{} 个条目）", entries.len());
     for e in &entries {
@@ -215,12 +207,7 @@ pub fn run_daemon(
     }
     eprintln!("按 Ctrl+C 停止。");
 
-    while !stop_clone.load(Ordering::Relaxed) {
-        if crate::platform::interrupted() {
-            stop_clone.store(true, Ordering::Relaxed);
-            break;
-        }
-
+    while !crate::platform::interrupted() {
         let now = SystemTime::now();
         let mut earliest_idx: Option<usize> = None;
         let mut earliest_time: Option<SystemTime> = None;
@@ -237,8 +224,11 @@ pub fn run_daemon(
         let trigger_time = match earliest_time {
             Some(t) => t,
             None => {
-                eprintln!("所有调度条目均无可触发的未来时间，退出。");
-                break;
+                // 所有条目均无可触发的未来时间（如 2/29 cron 扫描超 4 年）
+                // 不退出，等待 60 秒后重查（用户可能新增调度，或时钟推进）
+                eprintln!("所有调度条目均无可触发的未来时间，等待 60 秒后重查...");
+                std::thread::sleep(Duration::from_secs(60));
+                continue;
             }
         };
 
@@ -323,18 +313,21 @@ pub fn run_once(base: &Path, opts: &RunOptions) -> Result<i32> {
             continue;
         }
 
-        // 检查最近 60 秒内是否已执行过（防止重复触发）
-        if let Ok(history) = read_history(base, 5) {
-            let recent = history.iter().rev().find(|r| r.schedule_id == entry.id);
-            if let Some(r) = recent {
-                if let Ok(ts) = r.ts.parse::<jiff::Timestamp>() {
-                    let elapsed = now.duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_secs() as i64)
-                        .unwrap_or(0) - ts.as_second();
-                    if elapsed < 60 {
-                        continue; // 60 秒内已执行过
-                    }
-                }
+        // 检查当前分钟是否已执行过（防止 run-once 被多次调用导致重复触发）
+        // 用 triggered_at 时间戳判断，窗口 55 秒（略小于 60 秒防边界）
+        if let Ok(history) = read_history(base, 50) {
+            let now_secs = now.duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
+            let already_ran = history.iter().rev().any(|r| {
+                r.schedule_id == entry.id
+                    && r.triggered_at
+                        .parse::<jiff::Timestamp>()
+                        .map(|ts| now_secs - ts.as_second() < 55)
+                        .unwrap_or(false)
+            });
+            if already_ran {
+                continue;
             }
         }
 

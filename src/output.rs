@@ -48,8 +48,8 @@ impl EventSink for HumanSink {
             Event::JobStart { job, .. } => {
                 self.print(self.paint(&format!("[job] {job}"), JOB).to_string());
             }
-            Event::StepStart { job: _, step, .. } => {
-                self.print(format!("  {}", self.paint(&format!("[step] {step}"), STEP)));
+            Event::StepStart { job, step, .. } => {
+                self.print(format!("  {} {}", self.paint(&format!("[{job}]"), JOB), self.paint(&format!("[step] {step}"), STEP)));
             }
             Event::StepOutput { job, step, stream, line } => {
                 if self.quiet {
@@ -62,12 +62,13 @@ impl EventSink for HumanSink {
                 self.print(format!("    {prefix}{line}"));
                 let _ = (job, step);
             }
-            Event::StepEnd { step, code, duration_ms, .. } => {
+            Event::StepEnd { job, step, code, duration_ms, .. } => {
                 if code == 0 {
-                    self.print(format!("    {} ({duration_ms} ms)", self.paint("OK", OK)));
+                    self.print(format!("    {} {} ({duration_ms} ms)", self.paint(&format!("[{job}]"), JOB), self.paint("OK", OK)));
                 } else {
                     self.print(format!(
-                        "    {} (code {code}, {duration_ms} ms)",
+                        "    {} {} (code {code}, {duration_ms} ms)",
+                        self.paint(&format!("[{job}]"), JOB),
                         self.paint("FAIL", FAIL)
                     ));
                 }

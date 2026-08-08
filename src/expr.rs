@@ -26,6 +26,7 @@ pub fn interpolate(s: &str, env: &EnvMap) -> (String, Vec<String>) {
                 rest = &after[end + 1..];
             }
             None => {
+                warnings.push("未闭合变量插值 ${...}，保留原样".to_string());
                 out.push_str(&rest[start..]);
                 rest = "";
             }

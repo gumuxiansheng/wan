@@ -38,28 +38,52 @@ pub fn check_acyclic(workflow: &Workflow) -> Result<()> {
 }
 
 fn find_cycle_path(workflow: &Workflow) -> Vec<String> {
-    let mut visited = vec![false; workflow.jobs.len()];
+    let n = workflow.jobs.len();
+    let mut visited = vec![false; n];
+    let mut on_stack = vec![false; n];
     let mut path: Vec<String> = Vec::new();
-    fn dfs(workflow: &Workflow, idx: usize, visited: &mut [bool], path: &mut Vec<String>) -> Option<Vec<String>> {
-        if visited[idx] {
-            let pos = path.iter().position(|p| p == &workflow.jobs[idx].id)?;
-            let mut cycle = path[pos..].to_vec();
-            cycle.push(workflow.jobs[idx].id.clone());
-            return Some(cycle);
-        }
+
+    fn dfs(
+        workflow: &Workflow,
+        idx: usize,
+        visited: &mut [bool],
+        on_stack: &mut [bool],
+        path: &mut Vec<String>,
+    ) -> Option<Vec<String>> {
         visited[idx] = true;
+        on_stack[idx] = true;
         path.push(workflow.jobs[idx].id.clone());
+
         for need in &workflow.jobs[idx].needs {
             if let Some(k) = workflow.jobs.iter().position(|j| &j.id == need) {
-                if let Some(c) = dfs(workflow, k, visited, path) {
-                    return Some(c);
+                if !visited[k] {
+                    if let Some(c) = dfs(workflow, k, visited, on_stack, path) {
+                        return Some(c);
+                    }
+                } else if on_stack[k] {
+                    // 找到环：从 path 中环起点开始截取
+                    let pos = path.iter().position(|p| p == &workflow.jobs[k].id)?;
+                    let mut cycle = path[pos..].to_vec();
+                    cycle.push(workflow.jobs[k].id.clone());
+                    return Some(cycle);
                 }
             }
         }
+
         path.pop();
+        on_stack[idx] = false;
         None
     }
-    dfs(workflow, 0, &mut visited, &mut path).unwrap_or_else(|| vec!["?".to_string()])
+
+    // 遍历所有节点作为起点（覆盖从 jobs[0] 不可达的环）
+    for i in 0..n {
+        if !visited[i] {
+            if let Some(c) = dfs(workflow, i, &mut visited, &mut on_stack, &mut path) {
+                return c;
+            }
+        }
+    }
+    vec!["?".to_string()]
 }
 
 // ---------- 执行期 ----------
@@ -225,7 +249,7 @@ fn run_one_job(
             duration_ms: result.duration_ms,
         });
         if result.interrupted {
-            crate::platform::set_interrupted();
+            crate::platform::set_interrupted(true);
         }
     }
 

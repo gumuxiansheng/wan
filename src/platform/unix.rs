@@ -54,7 +54,7 @@ pub fn wait(proc: &mut StepProcess, timeout: Duration) -> io::Result<WaitResult>
 }
 
 impl StepProcess {
-    pub fn kill_graceful(&self) {
+    pub fn kill_terminate(&self) {
         // 仅当组长进程还活着才 killpg：防止 pgid 被回收后误杀其他进程组
         if self.child.is_some() {
             unsafe { libc::killpg(self.pgid, libc::SIGTERM) };
@@ -70,12 +70,15 @@ impl StepProcess {
 
 pub fn install_interrupt_handler() {
     unsafe extern "C" fn handler(_: libc::c_int) {
-        set_interrupted();
+        set_interrupted(true);
     }
-    let h = handler as *const () as libc::sighandler_t;
+    // 使用 sigaction 而非 signal（POSIX 推荐，行为更可移植）
+    let mut sa: libc::sigaction = std::mem::zeroed();
+    sa.sa_sigaction = handler as usize;
+    sa.sa_flags = libc::SA_RESTART;
     unsafe {
-        libc::signal(libc::SIGINT, h);
-        libc::signal(libc::SIGTERM, h);
+        libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
+        libc::sigaction(libc::SIGTERM, &sa, std::ptr::null_mut());
     }
 }
 

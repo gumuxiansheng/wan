@@ -119,19 +119,19 @@ pub fn wait(proc: &mut StepProcess, timeout: Duration) -> io::Result<WaitResult>
 }
 
 impl StepProcess {
-    pub fn kill_graceful(&self) {
+    pub fn kill_terminate(&self) {
         unsafe { TerminateJobObject(self.job.as_raw_handle() as HANDLE, 1) };
     }
 
     pub fn kill_force(&self) {
         // Windows 上 Job Object 即整树终止，无第二档
-        self.kill_graceful();
+        self.kill_terminate();
     }
 }
 
 pub fn install_interrupt_handler() {
     unsafe extern "system" fn ctrl_handler(_: u32) -> i32 {
-        set_interrupted();
+        set_interrupted(true);
         1 // 已处理：抑制默认终止，由执行器优雅清理后退出 130
     }
     unsafe {
