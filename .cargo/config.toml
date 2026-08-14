@@ -1,0 +1,15 @@
+# 跨编译配置（仅在交叉编译时使用，不影响本机构建）
+# 复用 sql-guard 验证过的方案：rust-lld + link-self-contained（纯 Rust 依赖，无需 C 编译器）
+#
+# 注意：link-self-contained 的稳定取值是 yes/no（= 全部自包含 / 不自包含）；
+#       细粒度写法（+mingw / +linker 等）需要 nightly 的 -Z unstable-options，不要用。
+
+# Linux x86_64 (musl, 静态链接，self-contained)
+[target.x86_64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes"]
+
+# Linux aarch64 (musl, 静态链接，self-contained)
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes"]

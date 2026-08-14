@@ -13,13 +13,18 @@ $:
             overlying: true
             title: $CNB_BRANCH
             description: "wan $CNB_BRANCH - 自动构建发布"
+        - name: install targets
+          script:
+            - rustup target add x86_64-unknown-linux-musl
         - name: build
           env:
             CARGO_TARGET_DIR: ./target-release
           script:
-            - cargo build --release --target x86_64-unknown-linux-gnu
+            # musl 静态链接（rust-lld + link-self-contained，见 .cargo/config.toml），
+            # 产物无 glibc 依赖，可在任意 Linux 发行版（含 Alpine）直接运行
+            - cargo build --release --target x86_64-unknown-linux-musl
             - mkdir -p ./dist
-            - cp ./target-release/x86_64-unknown-linux-gnu/release/wan ./dist/wan-linux-amd64
+            - cp ./target-release/x86_64-unknown-linux-musl/release/wan ./dist/wan-linux-amd64
         - name: upload release attachment
           image: cnbcool/attachments:latest
           settings:
@@ -33,18 +38,18 @@ $:
       docker:
         image: rust:latest
       stages:
-        - name: install targets and linker
+        - name: install targets
           script:
-            - rustup target add aarch64-unknown-linux-gnu
-            - apt-get update && apt-get install -y gcc-aarch64-linux-gnu
+            - rustup target add aarch64-unknown-linux-musl
         - name: build
           env:
             CARGO_TARGET_DIR: ./target-release
-            CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
           script:
-            - cargo build --release --target aarch64-unknown-linux-gnu
+            # musl 静态链接（rust-lld + link-self-contained，见 .cargo/config.toml），
+            # 产物无 glibc 依赖，可在任意 Linux 发行版（含 Alpine）直接运行
+            - cargo build --release --target aarch64-unknown-linux-musl
             - mkdir -p ./dist
-            - cp ./target-release/aarch64-unknown-linux-gnu/release/wan ./dist/wan-linux-arm64
+            - cp ./target-release/aarch64-unknown-linux-musl/release/wan ./dist/wan-linux-arm64
         - name: upload release attachment
           image: cnbcool/attachments:latest
           settings:
