@@ -97,10 +97,14 @@ fn install_windows(base: &Path) -> Result<()> {
     let output = std::process::Command::new("schtasks")
         .args([
             "/Create",
-            "/TN", &task_name(),
-            "/TR", &bat_path.to_string_lossy(),
-            "/SC", "MINUTE",
-            "/MO", "1",
+            "/TN",
+            &task_name(),
+            "/TR",
+            &bat_path.to_string_lossy(),
+            "/SC",
+            "MINUTE",
+            "/MO",
+            "1",
             "/F",
         ])
         .output()
@@ -127,7 +131,10 @@ fn remove_windows() -> Result<()> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // 任务不存在不算错误
-        if stderr.contains("无法找到") || stderr.contains("does not exist") || stderr.contains("cannot find") {
+        if stderr.contains("无法找到")
+            || stderr.contains("does not exist")
+            || stderr.contains("cannot find")
+        {
             return Ok(());
         }
         return Err(Error::config(format!("schtasks 删除失败：{stderr}")));
@@ -155,9 +162,11 @@ fn status_windows() -> Result<String> {
 
 #[cfg(unix)]
 fn systemd_user_dir() -> Result<PathBuf> {
-    let home = std::env::var("HOME")
-        .map_err(|_| Error::config("无法获取 HOME 环境变量"))?;
-    Ok(PathBuf::from(home).join(".config").join("systemd").join("user"))
+    let home = std::env::var("HOME").map_err(|_| Error::config("无法获取 HOME 环境变量"))?;
+    Ok(PathBuf::from(home)
+        .join(".config")
+        .join("systemd")
+        .join("user"))
 }
 
 #[cfg(unix)]

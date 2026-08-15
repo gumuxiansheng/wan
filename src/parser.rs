@@ -99,8 +99,11 @@ pub fn parse_document(content: &str) -> Result<DNode> {
                 return Err(Error::config("不支持 YAML anchor/alias"));
             }
             Event::Scalar(v, style, _, _) => {
-                let node =
-                    DNode::at(classify_scalar(&v, style), span.start.line(), span.start.col() + 1);
+                let node = DNode::at(
+                    classify_scalar(&v, style),
+                    span.start.line(),
+                    span.start.col() + 1,
+                );
                 push_node(&mut stack, &mut root, node)?;
             }
             Event::SequenceStart(_, _) => {
@@ -233,11 +236,7 @@ fn find<'a>(pairs: &'a [(DNode, DNode)], key: &str) -> Option<&'a DNode> {
 }
 
 /// 校验未知字段；runs-on/uses 给专门报错（F-PARSE-6 / §9）
-fn check_unknown(
-    pairs: &[(DNode, DNode)],
-    allowed: &[&str],
-    scope: &str,
-) -> Result<()> {
+fn check_unknown(pairs: &[(DNode, DNode)], allowed: &[&str], scope: &str) -> Result<()> {
     for (k, v) in pairs {
         let key = key_str(k, v)?;
         if !allowed.contains(&key.as_str()) {
@@ -245,14 +244,14 @@ fn check_unknown(
                 "runs-on" => "`runs-on` 永不支持（本工具无 runner 概念，单机执行）",
                 "uses" => "`uses:` action 生态永不支持（需 Node runtime / Docker）",
                 "matrix" => "`matrix` v0.1 不支持",
-                "container" | "services" => "`container:` / `services:` 永不支持（与零依赖定位冲突）",
+                "container" | "services" => {
+                    "`container:` / `services:` 永不支持（与零依赖定位冲突）"
+                }
                 "concurrency" => "`concurrency:` 不支持（单机本地执行）",
                 "schedule" => "`schedule:` 属 v0.2 cron 范围，v0.1 不支持",
                 _ => "未识别字段",
             };
-            return Err(v.err(format!(
-                "{scope}：{msg}：`{key}`（显式失败 > 静默降级）"
-            )));
+            return Err(v.err(format!("{scope}：{msg}：`{key}`（显式失败 > 静默降级）")));
         }
     }
     Ok(())
@@ -288,16 +287,23 @@ fn parse_retry(node: &DNode) -> Result<Retry> {
     let pairs = get_map(node, "retry")?;
     check_dup(pairs, "retry")?;
     check_unknown(pairs, &["attempts", "delay"], "retry")?;
-    let attempts_node = find(pairs, "attempts").ok_or_else(|| node.err("retry 缺少必填字段 attempts"))?;
+    let attempts_node =
+        find(pairs, "attempts").ok_or_else(|| node.err("retry 缺少必填字段 attempts"))?;
     let attempts = get_int(attempts_node, "retry.attempts")?;
     if attempts < 1 {
         return Err(attempts_node.err("retry.attempts 必须 >= 1（含首次）"));
     }
     let delay_node = find(pairs, "delay").ok_or_else(|| node.err("retry 缺少必填字段 delay"))?;
     let delay_str = get_str(delay_node, "retry.delay")?;
-    let delay = parse_duration(&delay_str)
-        .ok_or_else(|| delay_node.err(format!("retry.delay 格式非法：`{delay_str}`（支持 s/m/h 后缀，如 5s / 2m / 1h）")))?;
-    Ok(Retry { attempts: attempts as u32, delay })
+    let delay = parse_duration(&delay_str).ok_or_else(|| {
+        delay_node.err(format!(
+            "retry.delay 格式非法：`{delay_str}`（支持 s/m/h 后缀，如 5s / 2m / 1h）"
+        ))
+    })?;
+    Ok(Retry {
+        attempts: attempts as u32,
+        delay,
+    })
 }
 
 fn parse_duration(s: &str) -> Option<std::time::Duration> {
@@ -330,8 +336,15 @@ fn parse_step(node: &DNode, job_id: &str) -> Result<Step> {
     check_unknown(
         pairs,
         &[
-            "name", "run", "shell", "working-directory", "env", "if", "timeout-minutes",
-            "continue-on-error", "retry",
+            "name",
+            "run",
+            "shell",
+            "working-directory",
+            "env",
+            "if",
+            "timeout-minutes",
+            "continue-on-error",
+            "retry",
         ],
         &format!("jobs.{job_id}.steps[]"),
     )?;
@@ -342,7 +355,11 @@ fn parse_step(node: &DNode, job_id: &str) -> Result<Step> {
     let run = get_str(&run, "step.run")?;
 
     let shell_node = find(pairs, "shell")
-        .ok_or_else(|| node.err(format!("jobs.{job_id}.steps[] 缺少必填字段 shell（必须显式指定）")))?
+        .ok_or_else(|| {
+            node.err(format!(
+                "jobs.{job_id}.steps[] 缺少必填字段 shell（必须显式指定）"
+            ))
+        })?
         .clone();
     let shell = crate::shell::parse(&get_str(&shell_node, "step.shell")?)
         .map_err(|e| Error::config_at(e.msg, shell_node.line, shell_node.col))?;
@@ -404,7 +421,12 @@ fn parse_job(node: &DNode, id: &str) -> Result<Job> {
     check_unknown(
         pairs,
         &[
-            "needs", "env", "working-directory", "timeout-minutes", "if", "steps",
+            "needs",
+            "env",
+            "working-directory",
+            "timeout-minutes",
+            "if",
+            "steps",
         ],
         &format!("jobs.{id}"),
     )?;
@@ -425,7 +447,10 @@ fn parse_job(node: &DNode, id: &str) -> Result<Job> {
         None => EnvMap::new(),
     };
     let working_directory = match find(pairs, "working-directory") {
-        Some(w) => Some(PathBuf::from(get_str(w, &format!("jobs.{id}.working-directory"))?)),
+        Some(w) => Some(PathBuf::from(get_str(
+            w,
+            &format!("jobs.{id}.working-directory"),
+        )?)),
         None => None,
     };
     let timeout_minutes = match find(pairs, "timeout-minutes") {
@@ -473,7 +498,11 @@ fn parse_job(node: &DNode, id: &str) -> Result<Job> {
 fn parse_workflow_doc(root: &DNode, source: String) -> Result<Workflow> {
     let pairs = get_map(root, "workflow")?;
     check_dup(pairs, "workflow")?;
-    check_unknown(pairs, &["version", "env", "working-directory", "jobs"], "workflow")?;
+    check_unknown(
+        pairs,
+        &["version", "env", "working-directory", "jobs"],
+        "workflow",
+    )?;
 
     let version_node = find(pairs, "version")
         .ok_or_else(|| root.err("缺少顶层强制字段 version: 1"))?
@@ -533,7 +562,13 @@ fn parse_workflow_doc(root: &DNode, source: String) -> Result<Workflow> {
         }
     }
 
-    Ok(Workflow { version: 1, env, working_directory, jobs, source })
+    Ok(Workflow {
+        version: 1,
+        env,
+        working_directory,
+        jobs,
+        source,
+    })
 }
 
 /// 从字符串加载 workflow（校验全部 F-PARSE 需求）
@@ -545,9 +580,8 @@ pub fn load_from_str(content: &str, source: impl Into<String>) -> Result<Workflo
 
 /// 从文件加载 workflow
 pub fn load_file(path: &std::path::Path) -> Result<Workflow> {
-    let content = std::fs::read_to_string(path).map_err(|e| {
-        Error::io(format!("读取文件失败：{}：{e}", path.display()))
-    })?;
+    let content = std::fs::read_to_string(path)
+        .map_err(|e| Error::io(format!("读取文件失败：{}：{e}", path.display())))?;
     let source = path
         .file_stem()
         .map(|s| s.to_string_lossy().to_string())
@@ -610,7 +644,10 @@ jobs:
 
     #[test]
     fn dollar_brace_errors() {
-        let e = load("version: 1\njobs:\n  a:\n    steps:\n      - run: echo ${{ x }}\n        shell: sh\n").unwrap_err();
+        let e = load(
+            "version: 1\njobs:\n  a:\n    steps:\n      - run: echo ${{ x }}\n        shell: sh\n",
+        )
+        .unwrap_err();
         assert!(e.msg.contains("${{"), "{e}");
     }
 
@@ -630,7 +667,10 @@ jobs:
 
     #[test]
     fn bad_shell_enum() {
-        let e = load("version: 1\njobs:\n  a:\n    steps:\n      - run: x\n        shell: powershell\n").unwrap_err();
+        let e = load(
+            "version: 1\njobs:\n  a:\n    steps:\n      - run: x\n        shell: powershell\n",
+        )
+        .unwrap_err();
         assert!(e.msg.contains("shell"), "{e}");
     }
 

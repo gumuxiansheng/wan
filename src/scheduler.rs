@@ -109,7 +109,11 @@ struct Semaphore {
 
 impl Semaphore {
     fn new(cap: usize) -> Self {
-        Semaphore { cap, cur: Mutex::new(0), cv: Condvar::new() }
+        Semaphore {
+            cap,
+            cur: Mutex::new(0),
+            cv: Condvar::new(),
+        }
     }
 
     /// 返回 false 表示被中断
@@ -240,7 +244,10 @@ fn run_one_job(
         // 被跳过：不发射 JobStart/StepStart（§7.3）
         outcome = Outcome::Skipped;
     } else {
-        let _ = tx.send(Event::JobStart { job: job.id.clone(), ts: crate::model::now_rfc3339() });
+        let _ = tx.send(Event::JobStart {
+            job: job.id.clone(),
+            ts: crate::model::now_rfc3339(),
+        });
         let result = executor::run_job(job, &workflow.env, ctx, &tx, idx);
         outcome = result.outcome;
         let _ = tx.send(Event::JobEnd {

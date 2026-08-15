@@ -1,4 +1,4 @@
-﻿//! step 执行器：临时脚本派生 + 流式日志 + 超时 + 重试 + $WAN_OUTPUT（spec §14.3 / §6.5）
+//! step 执行器：临时脚本派生 + 流式日志 + 超时 + 重试 + $WAN_OUTPUT（spec §14.3 / §6.5）
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -202,7 +202,11 @@ fn spawn_and_wait(
             line,
         });
     }
-    Ok(AttemptOutcome { code, timed_out, interrupted })
+    Ok(AttemptOutcome {
+        code,
+        timed_out,
+        interrupted,
+    })
 }
 
 fn wait_exited(spawned: &mut Spawned) -> std::io::Result<u32> {
@@ -419,10 +423,18 @@ pub fn run_job(
         .clone()
         .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     if let Some(wd) = &ctx.workflow_wd {
-        base_dir = if wd.is_absolute() { wd.clone() } else { base_dir.join(wd) };
+        base_dir = if wd.is_absolute() {
+            wd.clone()
+        } else {
+            base_dir.join(wd)
+        };
     }
     if let Some(wd) = &job.working_directory {
-        base_dir = if wd.is_absolute() { wd.clone() } else { base_dir.join(wd) };
+        base_dir = if wd.is_absolute() {
+            wd.clone()
+        } else {
+            base_dir.join(wd)
+        };
     }
 
     let mut job_code: u32 = 0;
@@ -476,7 +488,11 @@ pub fn run_job(
 
     JobResult {
         outcome,
-        code: if outcome == Outcome::Failure { job_code } else { 0 },
+        code: if outcome == Outcome::Failure {
+            job_code
+        } else {
+            0
+        },
         duration_ms: start.elapsed().as_millis() as u64,
         interrupted,
     }

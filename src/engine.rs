@@ -28,11 +28,7 @@ pub fn workflow_name(workflow: &Workflow) -> String {
 }
 
 /// 执行 workflow，返回退出码：0 成功 / 1 失败 / 130 中断（§7.2）
-pub fn run(
-    workflow: &Workflow,
-    opts: &RunOptions,
-    sink: Box<dyn EventSink + Send>,
-) -> Result<i32> {
+pub fn run(workflow: &Workflow, opts: &RunOptions, sink: Box<dyn EventSink + Send>) -> Result<i32> {
     validate(workflow)?;
 
     // 复位中断标志（库形态连续调用不残留）

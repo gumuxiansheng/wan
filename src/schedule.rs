@@ -60,7 +60,11 @@ pub fn add_schedule(base: &Path, id: &str, cron_expr: &str, workflow_path: &Path
     if entries.iter().any(|e| e.0 == id) {
         return Err(Error::config(format!("调度 ID `{id}` 已存在")));
     }
-    entries.push((id.to_string(), cron_expr.to_string(), workflow_path.to_string_lossy().to_string()));
+    entries.push((
+        id.to_string(),
+        cron_expr.to_string(),
+        workflow_path.to_string_lossy().to_string(),
+    ));
 
     let json = serde_json::to_string_pretty(&entries)?;
     fs::write(&path, json)?;
@@ -71,7 +75,10 @@ pub fn add_schedule(base: &Path, id: &str, cron_expr: &str, workflow_path: &Path
 pub fn remove_schedule(base: &Path, id: &str) -> Result<bool> {
     let entries = load_schedules(base)?;
     let original_len = entries.len();
-    let filtered: Vec<_> = entries.into_iter().filter(|(eid, _, _)| eid != id).collect();
+    let filtered: Vec<_> = entries
+        .into_iter()
+        .filter(|(eid, _, _)| eid != id)
+        .collect();
 
     if filtered.len() == original_len {
         return Ok(false);
@@ -113,13 +120,12 @@ fn load_schedules(base: &Path) -> Result<Vec<(String, String, String)>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| Error::io(format!("读取调度文件失败：{e}")))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| Error::io(format!("读取调度文件失败：{e}")))?;
     if content.trim().is_empty() {
         return Ok(Vec::new());
     }
-    serde_json::from_str(&content)
-        .map_err(|e| Error::config(format!("调度文件格式错误：{e}")))
+    serde_json::from_str(&content).map_err(|e| Error::config(format!("调度文件格式错误：{e}")))
 }
 
 /// 追加一条历史记录
@@ -146,10 +152,14 @@ pub fn read_history(base: &Path, limit: usize) -> Result<Vec<HistoryRecord>> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let content = fs::read_to_string(&path)
-        .map_err(|e| Error::io(format!("读取历史文件失败：{e}")))?;
+    let content =
+        fs::read_to_string(&path).map_err(|e| Error::io(format!("读取历史文件失败：{e}")))?;
     let lines: Vec<&str> = content.lines().collect();
-    let start = if lines.len() > limit { lines.len() - limit } else { 0 };
+    let start = if lines.len() > limit {
+        lines.len() - limit
+    } else {
+        0
+    };
     let mut records = Vec::new();
     for line in &lines[start..] {
         if line.trim().is_empty() {
@@ -187,10 +197,8 @@ pub fn run_daemon(
 
     // 计算每个条目的下次触发时间
     let now = SystemTime::now();
-    let mut next_times: Vec<Option<SystemTime>> = entries
-        .iter()
-        .map(|e| e.cron.next_after(now))
-        .collect();
+    let mut next_times: Vec<Option<SystemTime>> =
+        entries.iter().map(|e| e.cron.next_after(now)).collect();
 
     // 安装信号处理
     crate::platform::install_interrupt_handler();
@@ -316,7 +324,8 @@ pub fn run_once(base: &Path, opts: &RunOptions) -> Result<i32> {
         // 检查当前分钟是否已执行过（防止 run-once 被多次调用导致重复触发）
         // 用 triggered_at 时间戳判断，窗口 55 秒（略小于 60 秒防边界）
         if let Ok(history) = read_history(base, 50) {
-            let now_secs = now.duration_since(std::time::UNIX_EPOCH)
+            let now_secs = now
+                .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs() as i64)
                 .unwrap_or(0);
             let already_ran = history.iter().rev().any(|r| {
@@ -354,7 +363,10 @@ pub fn run_once(base: &Path, opts: &RunOptions) -> Result<i32> {
             eprintln!("[{}] 历史记录写入失败：{}", entry.id, e);
         }
 
-        eprintln!("[{}] 执行完成：退出码 {}，耗时 {}ms", entry.id, exit_code, duration_ms);
+        eprintln!(
+            "[{}] 执行完成：退出码 {}，耗时 {}ms",
+            entry.id, exit_code, duration_ms
+        );
         last_exit = exit_code;
     }
 

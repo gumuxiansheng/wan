@@ -122,13 +122,41 @@ pub enum Stream {
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
-    RunStart { workflow: String, ts: String },
-    JobStart { job: String, ts: String },
-    StepStart { job: String, step: String, ts: String },
-    StepOutput { job: String, step: String, stream: Stream, line: String },
-    StepEnd { job: String, step: String, code: u32, duration_ms: u64 },
-    JobEnd { job: String, code: u32, duration_ms: u64 },
-    RunEnd { code: u32, duration_ms: u64, ts: String },
+    RunStart {
+        workflow: String,
+        ts: String,
+    },
+    JobStart {
+        job: String,
+        ts: String,
+    },
+    StepStart {
+        job: String,
+        step: String,
+        ts: String,
+    },
+    StepOutput {
+        job: String,
+        step: String,
+        stream: Stream,
+        line: String,
+    },
+    StepEnd {
+        job: String,
+        step: String,
+        code: u32,
+        duration_ms: u64,
+    },
+    JobEnd {
+        job: String,
+        code: u32,
+        duration_ms: u64,
+    },
+    RunEnd {
+        code: u32,
+        duration_ms: u64,
+        ts: String,
+    },
 }
 
 pub trait EventSink {

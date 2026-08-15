@@ -106,10 +106,7 @@ fn parse_marker(content: &str) -> Option<(String, String)> {
             // 格式：# wan-managed: pre-commit -> lint
             let rest = rest.trim();
             if let Some((hook_str, wf)) = rest.split_once("->") {
-                return Some((
-                    hook_str.trim().to_string(),
-                    wf.trim().to_string(),
-                ));
+                return Some((hook_str.trim().to_string(), wf.trim().to_string()));
             }
         }
     }
@@ -125,9 +122,8 @@ pub fn install(git_dir: &Path, hook: HookType, workflow: &str, force: bool) -> R
 
     // 检查已存在文件
     if hook_path.exists() {
-        let existing = std::fs::read_to_string(&hook_path).map_err(|e| {
-            Error::io(format!("读取已有 hook 失败：{e}"))
-        })?;
+        let existing = std::fs::read_to_string(&hook_path)
+            .map_err(|e| Error::io(format!("读取已有 hook 失败：{e}")))?;
 
         if parse_marker(&existing).is_some() {
             // wan-managed → 覆盖
@@ -150,7 +146,12 @@ pub fn install(git_dir: &Path, hook: HookType, workflow: &str, force: bool) -> R
         std::fs::copy(&hook_path, &bak)?;
         std::fs::write(&hook_path, hook_script_content(hook, workflow))?;
         set_executable(&hook_path);
-        println!("installed: {} -> {} (backed up to {})", hook.as_str(), workflow, bak.display());
+        println!(
+            "installed: {} -> {} (backed up to {})",
+            hook.as_str(),
+            workflow,
+            bak.display()
+        );
         return Ok(());
     }
 
@@ -166,10 +167,7 @@ pub fn remove(git_dir: &Path, hook: HookType, force: bool) -> Result<()> {
     let hook_path = git_dir.join("hooks").join(hook.filename());
 
     if !hook_path.exists() {
-        return Err(Error::config(format!(
-            "{} 不存在",
-            hook_path.display()
-        )));
+        return Err(Error::config(format!("{} 不存在", hook_path.display())));
     }
 
     let existing = std::fs::read_to_string(&hook_path)
@@ -192,7 +190,11 @@ pub fn remove(git_dir: &Path, hook: HookType, force: bool) -> Result<()> {
     let bak = hook_path.with_extension("bak");
     std::fs::copy(&hook_path, &bak)?;
     std::fs::remove_file(&hook_path)?;
-    println!("removed: {} (backed up to {})", hook_path.display(), bak.display());
+    println!(
+        "removed: {} (backed up to {})",
+        hook_path.display(),
+        bak.display()
+    );
     Ok(())
 }
 
@@ -282,11 +284,23 @@ mod tests {
 
     #[test]
     fn hook_type_parse() {
-        assert_eq!(HookType::from_str("pre-commit").unwrap(), HookType::PreCommit);
+        assert_eq!(
+            HookType::from_str("pre-commit").unwrap(),
+            HookType::PreCommit
+        );
         assert_eq!(HookType::from_str("pre-push").unwrap(), HookType::PrePush);
-        assert_eq!(HookType::from_str("post-commit").unwrap(), HookType::PostCommit);
-        assert_eq!(HookType::from_str("post-merge").unwrap(), HookType::PostMerge);
-        assert_eq!(HookType::from_str("post-checkout").unwrap(), HookType::PostCheckout);
+        assert_eq!(
+            HookType::from_str("post-commit").unwrap(),
+            HookType::PostCommit
+        );
+        assert_eq!(
+            HookType::from_str("post-merge").unwrap(),
+            HookType::PostMerge
+        );
+        assert_eq!(
+            HookType::from_str("post-checkout").unwrap(),
+            HookType::PostCheckout
+        );
         assert!(HookType::from_str("commit-msg").is_err());
         assert!(HookType::from_str("pre-rebase").is_err());
     }
@@ -434,7 +448,8 @@ mod tests {
 
     #[test]
     fn parse_marker_correct() {
-        let content = "#!/bin/sh\n# wan-managed: pre-commit -> lint\nexec wan run lint --quiet \"$@\"\n";
+        let content =
+            "#!/bin/sh\n# wan-managed: pre-commit -> lint\nexec wan run lint --quiet \"$@\"\n";
         let result = parse_marker(content);
         assert_eq!(result, Some(("pre-commit".to_string(), "lint".to_string())));
     }

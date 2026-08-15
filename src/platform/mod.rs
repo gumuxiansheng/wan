@@ -3,15 +3,15 @@ use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-#[cfg(windows)]
-mod windows;
 #[cfg(unix)]
 mod unix;
-
 #[cfg(windows)]
-use self::windows as imp;
+mod windows;
+
 #[cfg(unix)]
 use self::unix as imp;
+#[cfg(windows)]
+use self::windows as imp;
 
 pub use imp::StepProcess;
 

@@ -11,11 +11,11 @@ use std::time::{Duration, Instant};
 
 use windows_sys::Win32::Foundation::{CloseHandle, HANDLE};
 use windows_sys::Win32::System::Console::{
-    SetConsoleCP, SetConsoleOutputCP, SetConsoleCtrlHandler,
+    SetConsoleCP, SetConsoleCtrlHandler, SetConsoleOutputCP,
 };
 use windows_sys::Win32::System::JobObjects::{
-    AssignProcessToJobObject, CreateJobObjectW, SetInformationJobObject, TerminateJobObject,
-    JobObjectExtendedLimitInformation, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, TerminateJobObject, JOBOBJECT_EXTENDED_LIMIT_INFORMATION,
     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
 };
 use windows_sys::Win32::System::Threading::{
@@ -64,8 +64,14 @@ pub fn spawn(mut cmd: Command) -> io::Result<Spawned> {
     let job = unsafe { create_job() }?;
     let mut child = cmd.spawn()?;
     let pid = child.id();
-    let stdout = child.stdout.take().map(|s| -> Box<dyn Read + Send> { Box::new(s) });
-    let stderr = child.stderr.take().map(|s| -> Box<dyn Read + Send> { Box::new(s) });
+    let stdout = child
+        .stdout
+        .take()
+        .map(|s| -> Box<dyn Read + Send> { Box::new(s) });
+    let stderr = child
+        .stderr
+        .take()
+        .map(|s| -> Box<dyn Read + Send> { Box::new(s) });
 
     let proc_handle = unsafe {
         let h = OpenProcess(

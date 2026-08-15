@@ -124,7 +124,10 @@ impl CronExpr {
 
     /// 检查当前时间是否匹配（分钟粒度）
     pub fn matches_now(&self, now: SystemTime) -> bool {
-        let secs = now.duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let secs = now
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
         // 对齐到当前分钟边界
         let minute_start = secs - (secs % 60);
         self.matches_timestamp(minute_start)
@@ -183,9 +186,9 @@ fn parse_field(s: &str, min: u32, max: u32, name: &str) -> Result<Field> {
             }
         } else if part.contains('/') {
             // N-M/S
-            let (range_str, step_str) = part.split_once('/').ok_or_else(|| {
-                Error::config(format!("cron {name} 字段格式非法：`{part}`"))
-            })?;
+            let (range_str, step_str) = part
+                .split_once('/')
+                .ok_or_else(|| Error::config(format!("cron {name} 字段格式非法：`{part}`")))?;
             let step: u32 = step_str
                 .parse()
                 .map_err(|_| Error::config(format!("cron {name} 字段步进非法：`{step_str}`")))?;
@@ -223,9 +226,9 @@ fn parse_field(s: &str, min: u32, max: u32, name: &str) -> Result<Field> {
 }
 
 fn parse_range(s: &str, min: u32, max: u32, name: &str) -> Result<(u32, u32)> {
-    let (lo_str, hi_str) = s.split_once('-').ok_or_else(|| {
-        Error::config(format!("cron {name} 字段范围格式非法：`{s}`"))
-    })?;
+    let (lo_str, hi_str) = s
+        .split_once('-')
+        .ok_or_else(|| Error::config(format!("cron {name} 字段范围格式非法：`{s}`")))?;
     let lo: u32 = lo_str
         .parse()
         .map_err(|_| Error::config(format!("cron {name} 字段范围下限非法：`{lo_str}`")))?;
@@ -370,7 +373,10 @@ mod tests {
         // 最多 4 年后
         if let Some(next) = c.next_after(now) {
             let diff = next.duration_since(now).unwrap().as_secs();
-            assert!(diff <= 4 * 365 * 24 * 3600 + 60, "next_after too far: {diff}s");
+            assert!(
+                diff <= 4 * 365 * 24 * 3600 + 60,
+                "next_after too far: {diff}s"
+            );
         }
         // 不存在匹配时返回 None 也可接受（但 4 年内一定有 2/29）
     }

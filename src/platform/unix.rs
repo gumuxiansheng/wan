@@ -20,12 +20,22 @@ pub fn spawn(mut cmd: Command) -> io::Result<Spawned> {
     cmd.process_group(0);
     let mut child = cmd.spawn()?;
     let pgid = child.id() as i32;
-    let stdout = child.stdout.take().map(|s| -> Box<dyn Read + Send> { Box::new(s) });
-    let stderr = child.stderr.take().map(|s| -> Box<dyn Read + Send> { Box::new(s) });
+    let stdout = child
+        .stdout
+        .take()
+        .map(|s| -> Box<dyn Read + Send> { Box::new(s) });
+    let stderr = child
+        .stderr
+        .take()
+        .map(|s| -> Box<dyn Read + Send> { Box::new(s) });
     Ok(Spawned {
         stdout,
         stderr,
-        process: StepProcess { child: Some(child), pgid, reaped: None },
+        process: StepProcess {
+            child: Some(child),
+            pgid,
+            reaped: None,
+        },
     })
 }
 

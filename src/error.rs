@@ -16,7 +16,12 @@ pub struct Error {
 
 impl Error {
     pub fn config(msg: impl Into<String>) -> Self {
-        Error { kind: ErrorKind::Config, msg: msg.into(), line: None, col: None }
+        Error {
+            kind: ErrorKind::Config,
+            msg: msg.into(),
+            line: None,
+            col: None,
+        }
     }
 
     pub fn config_at(msg: impl Into<String>, line: usize, col: usize) -> Self {
@@ -29,7 +34,12 @@ impl Error {
     }
 
     pub fn io(msg: impl Into<String>) -> Self {
-        Error { kind: ErrorKind::Io, msg: msg.into(), line: None, col: None }
+        Error {
+            kind: ErrorKind::Io,
+            msg: msg.into(),
+            line: None,
+            col: None,
+        }
     }
 
     pub fn exit_code(&self) -> i32 {

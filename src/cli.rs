@@ -1,12 +1,12 @@
-﻿//! CLI 层（spec §7）：薄壳，仅参数解析与退出码
+//! CLI 层（spec §7）：薄壳，仅参数解析与退出码
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use lexopt::prelude::*;
 
-use crate::error::{Error, Result};
 use crate::engine;
+use crate::error::{Error, Result};
 use crate::model::RunOptions;
 use crate::output::{HumanSink, JsonSink};
 use crate::parser::load_file;
@@ -138,7 +138,9 @@ fn dispatch(args: Vec<OsString>) -> Result<i32> {
         "hook" => cmd_hook(parser),
         "schedule" => cmd_schedule(parser),
         "help" => Ok(print_help()),
-        _ => Err(Error::config(format!("未知命令 `{cmd}`，`wan --help` 查看用法"))),
+        _ => Err(Error::config(format!(
+            "未知命令 `{cmd}`，`wan --help` 查看用法"
+        ))),
     }
 }
 
@@ -239,7 +241,10 @@ fn cmd_run(parser: lexopt::Parser) -> Result<i32> {
     let mut parser = parser;
     let file = parse_common_flags(&mut parser, &mut flags)?
         .ok_or_else(|| Error::config("`wan run` 需要 <file> 参数"))?;
-    let base = flags.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let base = flags
+        .cwd
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let path = resolve_workflow_file(&file.to_string_lossy(), &base)?;
 
     let wf = load_file(&path)?;
@@ -267,12 +272,19 @@ fn cmd_validate(parser: lexopt::Parser) -> Result<i32> {
     let mut parser = parser;
     let file = parse_common_flags(&mut parser, &mut flags)?
         .ok_or_else(|| Error::config("`wan validate` 需要 <file> 参数"))?;
-    let base = flags.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let base = flags
+        .cwd
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let path = resolve_workflow_file(&file.to_string_lossy(), &base)?;
 
     let wf = load_file(&path)?;
     engine::validate(&wf)?;
-    println!("OK: {} 校验通过（{} job, DAG 无环）", path.display(), wf.jobs.len());
+    println!(
+        "OK: {} 校验通过（{} job, DAG 无环）",
+        path.display(),
+        wf.jobs.len()
+    );
     Ok(0)
 }
 
@@ -281,7 +293,9 @@ fn cmd_list(parser: lexopt::Parser) -> Result<i32> {
     let mut parser = parser;
     let _file = parse_common_flags(&mut parser, &mut flags)?;
 
-    let dir = flags.cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let dir = flags
+        .cwd
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let wf_dir = dir.join(".wan").join("workflows");
     let search_dir = if wf_dir.is_dir() { wf_dir } else { dir };
 
@@ -312,7 +326,10 @@ fn cmd_graph(parser: lexopt::Parser) -> Result<i32> {
     let mut parser = parser;
     let file = parse_common_flags(&mut parser, &mut flags)?
         .ok_or_else(|| Error::config("`wan graph` 需要 <file> 参数"))?;
-    let base = flags.cwd.clone().unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let base = flags
+        .cwd
+        .clone()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let path = resolve_workflow_file(&file.to_string_lossy(), &base)?;
 
     let wf = load_file(&path)?;
@@ -338,10 +355,16 @@ fn cmd_hook(parser: lexopt::Parser) -> Result<i32> {
             println!("wan hook remove <hook-type> [-C <dir>] [--force]");
             println!("wan hook list [-C <dir>]");
             println!();
-            println!("<hook-type>: pre-commit / pre-push / post-commit / post-merge / post-checkout");
+            println!(
+                "<hook-type>: pre-commit / pre-push / post-commit / post-merge / post-checkout"
+            );
             return Ok(0);
         }
-        _ => return Err(Error::config("`wan hook` 需要子命令 install / remove / list")),
+        _ => {
+            return Err(Error::config(
+                "`wan hook` 需要子命令 install / remove / list",
+            ))
+        }
     };
 
     // 解析公共参数 -C / --force / 位置参数
@@ -365,32 +388,38 @@ fn cmd_hook(parser: lexopt::Parser) -> Result<i32> {
             Long("no-color") => { /* hook 不产生颜色输出，忽略 */ }
             Value(v) => positional.push(v.to_string_lossy().to_string()),
             Short(_) | Long(_) => {
-                return Err(Error::config("未知选项，`wan hook --help` 查看用法".to_string()))
+                return Err(Error::config(
+                    "未知选项，`wan hook --help` 查看用法".to_string(),
+                ))
             }
         }
     }
 
-    let search_dir = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let search_dir =
+        cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
     let git_dir = crate::hook::find_git_dir(&search_dir).ok_or_else(|| {
-        Error::config(format!("不在 git 仓库内（从 {} 未找到 .git 目录）", search_dir.display()))
+        Error::config(format!(
+            "不在 git 仓库内（从 {} 未找到 .git 目录）",
+            search_dir.display()
+        ))
     })?;
 
     match sub.as_str() {
         "install" => {
-            let hook_str = positional.first().ok_or_else(|| {
-                Error::config("`wan hook install` 需要 <hook-type> 参数")
-            })?;
-            let workflow = positional.get(1).ok_or_else(|| {
-                Error::config("`wan hook install` 需要 <workflow> 参数")
-            })?;
+            let hook_str = positional
+                .first()
+                .ok_or_else(|| Error::config("`wan hook install` 需要 <hook-type> 参数"))?;
+            let workflow = positional
+                .get(1)
+                .ok_or_else(|| Error::config("`wan hook install` 需要 <workflow> 参数"))?;
             let hook_type = crate::hook::HookType::from_str(hook_str)?;
             crate::hook::install(&git_dir, hook_type, workflow, force)?;
             Ok(0)
         }
         "remove" => {
-            let hook_str = positional.first().ok_or_else(|| {
-                Error::config("`wan hook remove` 需要 <hook-type> 参数")
-            })?;
+            let hook_str = positional
+                .first()
+                .ok_or_else(|| Error::config("`wan hook remove` 需要 <hook-type> 参数"))?;
             let hook_type = crate::hook::HookType::from_str(hook_str)?;
             crate::hook::remove(&git_dir, hook_type, force)?;
             Ok(0)
@@ -429,7 +458,9 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
             println!("<cron-expr>: 分 时 日 月 周（如 `0 2 * * *` 每天 02:00）");
             return Ok(0);
         }
-        _ => return Err(Error::config("`wan schedule` 需要子命令 add / remove / list / start / run-once / service / history")),
+        _ => return Err(Error::config(
+            "`wan schedule` 需要子命令 add / remove / list / start / run-once / service / history",
+        )),
     };
 
     // 解析公共参数
@@ -459,17 +490,23 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
             Long("catch-up") => catch_up = true,
             Long("limit") => {
                 let v = take_value(&mut parser, "--limit")?;
-                limit = v.to_string_lossy().parse().map_err(|_| Error::config("`--limit` 需要正整数"))?;
+                limit = v
+                    .to_string_lossy()
+                    .parse()
+                    .map_err(|_| Error::config("`--limit` 需要正整数"))?;
             }
             Long("force") => { /* schedule 不用 force，但容忍 */ }
             Value(v) => positional.push(v.to_string_lossy().to_string()),
             Short(_) | Long(_) => {
-                return Err(Error::config("未知选项，`wan schedule --help` 查看用法".to_string()))
+                return Err(Error::config(
+                    "未知选项，`wan schedule --help` 查看用法".to_string(),
+                ))
             }
         }
     }
 
-    let base = cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let base =
+        cwd.unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
 
     match sub.as_str() {
         "add" => {
@@ -623,7 +660,11 @@ mod tests {
         let file = parse_common_flags(&mut parser, &mut flags).unwrap();
         assert!(flags.json, "json flag not set");
         let cwd = flags.cwd.expect("cwd should be set");
-        assert!(cwd.to_string_lossy().ends_with('.'), "cwd: {}", cwd.display());
+        assert!(
+            cwd.to_string_lossy().ends_with('.'),
+            "cwd: {}",
+            cwd.display()
+        );
         assert_eq!(file, Some(PathBuf::from("a.yml")));
     }
 
@@ -650,7 +691,11 @@ mod tests {
         let dir = make_tmp_workflows();
         let p = resolve_workflow_file("hello", &dir).unwrap();
         let name = p.file_name().unwrap().to_string_lossy().into_owned();
-        let expected = if cfg!(windows) { "hello-win.yml" } else { "hello-unix.yml" };
+        let expected = if cfg!(windows) {
+            "hello-win.yml"
+        } else {
+            "hello-unix.yml"
+        };
         assert_eq!(name, expected, "平台后缀未优先");
     }
 
@@ -665,7 +710,11 @@ mod tests {
     fn resolve_strips_extension() {
         let dir = make_tmp_workflows();
         let p = resolve_workflow_file("hello.yml", &dir).unwrap();
-        assert!(p.to_string_lossy().contains("hello-"), "应解析为平台后缀文件: {}", p.display());
+        assert!(
+            p.to_string_lossy().contains("hello-"),
+            "应解析为平台后缀文件: {}",
+            p.display()
+        );
     }
 
     #[test]
@@ -681,7 +730,10 @@ mod tests {
         let dir = make_tmp_workflows();
         let e = resolve_workflow_file("nope", &dir).unwrap_err();
         assert!(e.msg.contains("未找到"), "{e}");
-        assert!(e.msg.contains("nope-win") || e.msg.contains("nope-unix"), "{e}");
+        assert!(
+            e.msg.contains("nope-win") || e.msg.contains("nope-unix"),
+            "{e}"
+        );
     }
 
     #[test]

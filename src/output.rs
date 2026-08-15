@@ -32,26 +32,46 @@ impl HumanSink {
     }
 }
 
-const JOB: Style = Style::new().bold().fg_color(Some(Color::Ansi(AnsiColor::Cyan)));
+const JOB: Style = Style::new()
+    .bold()
+    .fg_color(Some(Color::Ansi(AnsiColor::Cyan)));
 const STEP: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::Blue)));
-const OK: Style = Style::new().bold().fg_color(Some(Color::Ansi(AnsiColor::Green)));
-const FAIL: Style = Style::new().bold().fg_color(Some(Color::Ansi(AnsiColor::Red)));
-const WARN: Style = Style::new().bold().fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
+const OK: Style = Style::new()
+    .bold()
+    .fg_color(Some(Color::Ansi(AnsiColor::Green)));
+const FAIL: Style = Style::new()
+    .bold()
+    .fg_color(Some(Color::Ansi(AnsiColor::Red)));
+const WARN: Style = Style::new()
+    .bold()
+    .fg_color(Some(Color::Ansi(AnsiColor::Yellow)));
 const DIM: Style = Style::new().fg_color(Some(Color::Ansi(AnsiColor::BrightBlack)));
 
 impl EventSink for HumanSink {
     fn emit(&mut self, event: Event) {
         match event {
             Event::RunStart { workflow, .. } => {
-                self.print(self.paint(&format!("==> 开始运行 workflow: {workflow}"), JOB).to_string());
+                self.print(
+                    self.paint(&format!("==> 开始运行 workflow: {workflow}"), JOB)
+                        .to_string(),
+                );
             }
             Event::JobStart { job, .. } => {
                 self.print(self.paint(&format!("[job] {job}"), JOB).to_string());
             }
             Event::StepStart { job, step, .. } => {
-                self.print(format!("  {} {}", self.paint(&format!("[{job}]"), JOB), self.paint(&format!("[step] {step}"), STEP)));
+                self.print(format!(
+                    "  {} {}",
+                    self.paint(&format!("[{job}]"), JOB),
+                    self.paint(&format!("[step] {step}"), STEP)
+                ));
             }
-            Event::StepOutput { job, step, stream, line } => {
+            Event::StepOutput {
+                job,
+                step,
+                stream,
+                line,
+            } => {
                 if self.quiet {
                     return;
                 }
@@ -62,9 +82,19 @@ impl EventSink for HumanSink {
                 self.print(format!("    {prefix}{line}"));
                 let _ = (job, step);
             }
-            Event::StepEnd { job, step, code, duration_ms, .. } => {
+            Event::StepEnd {
+                job,
+                step,
+                code,
+                duration_ms,
+                ..
+            } => {
                 if code == 0 {
-                    self.print(format!("    {} {} ({duration_ms} ms)", self.paint(&format!("[{job}]"), JOB), self.paint("OK", OK)));
+                    self.print(format!(
+                        "    {} {} ({duration_ms} ms)",
+                        self.paint(&format!("[{job}]"), JOB),
+                        self.paint("OK", OK)
+                    ));
                 } else {
                     self.print(format!(
                         "    {} {} (code {code}, {duration_ms} ms)",
@@ -74,11 +104,22 @@ impl EventSink for HumanSink {
                 }
                 let _ = step;
             }
-            Event::JobEnd { job, code, duration_ms, .. } => {
-                let status = if code == 0 { self.paint("OK", OK) } else { self.paint("FAIL", FAIL) };
+            Event::JobEnd {
+                job,
+                code,
+                duration_ms,
+                ..
+            } => {
+                let status = if code == 0 {
+                    self.paint("OK", OK)
+                } else {
+                    self.paint("FAIL", FAIL)
+                };
                 self.print(format!("[job] {job} {status} ({duration_ms} ms)"));
             }
-            Event::RunEnd { code, duration_ms, .. } => {
+            Event::RunEnd {
+                code, duration_ms, ..
+            } => {
                 let status = if code == 0 {
                     self.paint("成功", OK)
                 } else if code == 130 {
@@ -107,7 +148,11 @@ impl<W: Write> JsonSink<W> {
 
 impl<W: Write> EventSink for JsonSink<W> {
     fn emit(&mut self, event: Event) {
-        let _ = writeln!(self.out, "{}", serde_json::to_string(&event).unwrap_or_default());
+        let _ = writeln!(
+            self.out,
+            "{}",
+            serde_json::to_string(&event).unwrap_or_default()
+        );
     }
 }
 

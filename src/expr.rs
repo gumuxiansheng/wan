@@ -90,8 +90,9 @@ fn parse_literal(s: &str) -> Result<Literal> {
     }
     let is_num = |s: &str| -> bool {
         !s.is_empty()
-            && s.chars()
-                .all(|c| c.is_ascii_digit() || c == '.' || c == '+' || c == '-' || c == 'e' || c == 'E')
+            && s.chars().all(|c| {
+                c.is_ascii_digit() || c == '.' || c == '+' || c == '-' || c == 'e' || c == 'E'
+            })
             && s.parse::<f64>().is_ok()
     };
     if is_num(t) {
@@ -146,7 +147,13 @@ pub fn parse_if(s: &str) -> Result<Expr> {
 pub fn literal_string(lit: &Literal) -> String {
     match lit {
         Literal::Str(s) => s.clone(),
-        Literal::Bool(b) => if *b { "true".to_string() } else { "false".to_string() },
+        Literal::Bool(b) => {
+            if *b {
+                "true".to_string()
+            } else {
+                "false".to_string()
+            }
+        }
         Literal::Num(f) => {
             if f.fract() == 0.0 && f.is_finite() {
                 format!("{}", *f as i64)
@@ -204,7 +211,10 @@ mod tests {
     use super::*;
 
     fn env(pairs: &[(&str, &str)]) -> EnvMap {
-        pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
     }
 
     #[test]
@@ -263,9 +273,29 @@ mod tests {
         assert!(!eval(&Expr::Success, false, false, &e));
         assert!(eval(&Expr::Failure, true, true, &e));
         assert!(eval(&Expr::Always, false, true, &e));
-        assert!(eval(&Expr::Eq("OS".into(), Literal::Str("windows".into())), true, false, &e));
-        assert!(eval(&Expr::Eq("MISSING".into(), Literal::Str("".into())), true, false, &e));
-        assert!(eval(&Expr::Eq("EMPTY".into(), Literal::Null), true, false, &e));
-        assert!(eval(&Expr::Ne("OS".into(), Literal::Str("linux".into())), true, false, &e));
+        assert!(eval(
+            &Expr::Eq("OS".into(), Literal::Str("windows".into())),
+            true,
+            false,
+            &e
+        ));
+        assert!(eval(
+            &Expr::Eq("MISSING".into(), Literal::Str("".into())),
+            true,
+            false,
+            &e
+        ));
+        assert!(eval(
+            &Expr::Eq("EMPTY".into(), Literal::Null),
+            true,
+            false,
+            &e
+        ));
+        assert!(eval(
+            &Expr::Ne("OS".into(), Literal::Str("linux".into())),
+            true,
+            false,
+            &e
+        ));
     }
 }

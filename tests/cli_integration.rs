@@ -8,7 +8,10 @@ fn bin() -> &'static str {
 }
 
 fn fixture(name: &str) -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures").join(name)
+    Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures")
+        .join(name)
 }
 
 /// Windows 用 cmd fixture；其余平台用 sh fixture
@@ -24,7 +27,11 @@ fn platform_fixture(win: &str, unix: &str) -> PathBuf {
 fn run_success_exit0() {
     let f = platform_fixture("hello-win.yml", "hello-unix.yml");
     let out = Command::new(bin()).arg("run").arg(&f).output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("hello from"), "stdout: {stdout}");
 }
@@ -42,7 +49,12 @@ fn run_failure_exit1_and_skip_propagation() {
 #[test]
 fn json_events_shape() {
     let f = platform_fixture("hello-win.yml", "hello-unix.yml");
-    let out = Command::new(bin()).arg("run").arg("--json").arg(&f).output().unwrap();
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("--json")
+        .arg(&f)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     let lines: Vec<&str> = stdout.lines().filter(|l| !l.trim().is_empty()).collect();
@@ -58,13 +70,21 @@ fn json_events_shape() {
 #[test]
 fn validate_ok_and_bad() {
     let good = platform_fixture("hello-win.yml", "hello-unix.yml");
-    let out = Command::new(bin()).arg("validate").arg(&good).output().unwrap();
+    let out = Command::new(bin())
+        .arg("validate")
+        .arg(&good)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("OK"), "stdout: {stdout}");
 
     let bad = fixture("dag-cycle.yml");
-    let out = Command::new(bin()).arg("validate").arg(&bad).output().unwrap();
+    let out = Command::new(bin())
+        .arg("validate")
+        .arg(&bad)
+        .output()
+        .unwrap();
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("环"), "stderr: {stderr}");
@@ -87,15 +107,26 @@ fn output_passthrough() {
         return;
     }
     let out = Command::new(bin()).arg("run").arg(&f).output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("got: from-step-1"), "stdout: {stdout}");
 }
 
 #[test]
 fn list_command() {
-    let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests").join("fixtures");
-    let out = Command::new(bin()).arg("list").arg("-C").arg(&fixtures_dir).output().unwrap();
+    let fixtures_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests")
+        .join("fixtures");
+    let out = Command::new(bin())
+        .arg("list")
+        .arg("-C")
+        .arg(&fixtures_dir)
+        .output()
+        .unwrap();
     assert!(out.status.success());
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("hello-win"), "stdout: {stdout}");
@@ -111,7 +142,11 @@ fn retry_recovers() {
     let _ = std::fs::remove_file(&marker);
     let f = fixture("retry-win.yml");
     let out = Command::new(bin()).arg("run").arg(&f).output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("重试"), "stderr: {stderr}");
     let stdout = String::from_utf8_lossy(&out.stdout);
@@ -133,7 +168,11 @@ fn pwsh_smoke() {
     }
     let f = fixture("pwsh-win.yml");
     let out = Command::new(bin()).arg("run").arg(&f).output().unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(stdout.contains("got ver="), "stdout: {stdout}");
     assert!(stdout.contains("second try ok"), "stdout: {stdout}");
@@ -161,26 +200,55 @@ fn short_name_resolution() {
             "version: 1\njobs:\n  a:\n    steps:\n      - name: x\n        shell: {shell}\n        run: echo {mark}\n"
         )
     };
-    let (plat_shell, _unix_shell) = if cfg!(windows) { ("cmd", "sh") } else { ("sh", "sh") };
+    let (plat_shell, _unix_shell) = if cfg!(windows) {
+        ("cmd", "sh")
+    } else {
+        ("sh", "sh")
+    };
     std::fs::write(wf_dir.join("short-win.yml"), content("cmd", "win-ran")).unwrap();
     std::fs::write(wf_dir.join("short-unix.yml"), content("sh", "unix-ran")).unwrap();
     std::fs::write(wf_dir.join("plain.yml"), content(plat_shell, "plain-ran")).unwrap();
 
     let run_in = |name: &str| {
-        Command::new(bin()).arg("run").arg("-C").arg(&tmp).arg(name).output().unwrap()
+        Command::new(bin())
+            .arg("run")
+            .arg("-C")
+            .arg(&tmp)
+            .arg(name)
+            .output()
+            .unwrap()
     };
 
     // 平台后缀优先（Windows 取 short-win，Linux 取 short-unix）
     let out = run_in("short");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    let expected_wf = if cfg!(windows) { "short-win" } else { "short-unix" };
-    assert!(stdout.contains(&format!("workflow: {expected_wf}")), "stdout: {stdout}");
+    let expected_wf = if cfg!(windows) {
+        "short-win"
+    } else {
+        "short-unix"
+    };
+    assert!(
+        stdout.contains(&format!("workflow: {expected_wf}")),
+        "stdout: {stdout}"
+    );
 
     // 无平台后缀时回退到同名文件
     let out = run_in("plain");
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
-    assert!(String::from_utf8_lossy(&out.stdout).contains("workflow: plain"), "stdout: {}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("workflow: plain"),
+        "stdout: {}",
+        String::from_utf8_lossy(&out.stdout)
+    );
 
     // 都不存在 → 退出码 2，stderr 列出候选
     let out = run_in("missing");
