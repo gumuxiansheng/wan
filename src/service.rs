@@ -10,7 +10,10 @@
 //! - 任务名/unit 名含项目路径哈希（WanSchedule-<hash8> / wan-schedule-<hash8>），
 //!   同机多项目分别 setup 时互不覆盖
 //! - 旧版使用固定名 WanSchedule / wan-schedule，install/remove 时顺带清理
-//! - Windows 下 run-once 通过 `.vbs` 隐藏窗口启动（schtasks 直接跑 bat 会闪 cmd 窗口），
+//! - Windows 下通过 `wan-shim.exe`（GUI 子系统，无控制台窗口）启动 wan.exe：
+//!   schtasks /TR 指向 shim，shim 以 CREATE_NO_WINDOW 启动 wan.exe schedule run-once。
+//!   不依赖 wscript/vbs，不受 VBScript 2027 弃用影响。
+//!   旧版曾用 .vbs 隐藏窗口，install 时顺带清理旧 vbs/bat 文件。
 //!   任务注册为 "仅登录时运行"（/IT）——不同用户会话下可见性一致，均不弹窗
 
 use std::path::{Path, PathBuf};
@@ -132,86 +135,57 @@ pub fn status(base: &Path) -> Result<String> {
 #[cfg(windows)]
 const LEGACY_TASK_NAME: &str = "WanSchedule";
 
-/// VBS 字符串字面量转义：双引号翻倍（VBS 字符串内用 `""` 表示一个字面双引号），
-/// 换行/制表符转成 VBS 转义序列（Chr 不可用于单行 sh.Run 参数，且 0/False 字面量
-/// 已固定，不需处理非 ASCII——路径均为 Rust String 的 UTF-8，VBS 以系统 ANSI 解析，
-/// 中文路径可能乱码，因此转成 ANSI 直写有风险，这里对非 ASCII 转 Chr 序列拼接）。
+/// Windows: 查找同目录下的 wan-shim.exe（GUI 子系统，无控制台窗口）
+/// schtasks /TR 指向 shim，shim 以 CREATE_NO_WINDOW 启动 wan.exe schedule run-once
 #[cfg(windows)]
-fn vbs_string_literal(s: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\"\""),
-            '\r' => {}
-            '\n' => out.push_str("\" & vbCrLf & \""),
-            '\t' => out.push_str("\" & vbTab & \""),
-            c if (c as u32) < 32 => out.push_str(&format!("\" & Chr({}) & \"", c as u32)),
-            c if (c as u32) < 128 => out.push(c),
-            c => out.push_str(&format!("\" & ChrW({}) & \"", c as u32)),
-        }
+fn shim_path() -> Result<PathBuf> {
+    let exe = self_exe()?;
+    let dir = exe.parent().ok_or_else(|| Error::io("无法获取 exe 目录"))?;
+    let shim = dir.join("wan-shim.exe");
+    if !shim.exists() {
+        return Err(Error::io(format!(
+            "wan-shim.exe 不存在于 {}（请确认 gates-toolkit bin 目录完整）",
+            dir.display()
+        )));
     }
-    out.push('\"');
-    out
+    Ok(shim)
 }
-
-/// Windows: 生成无窗口启动器。schtasks 的 /TR 若直接指向 .bat/.exe，
-/// 会在桌面闪一个 cmd 窗口；包一层 .vbs（wscript 宿主，无控制台）彻底静默。
-/// 内层命令拼成单个字符串（含引号），整体经 vbs_string_literal 转义——
-/// VBS 中相邻字符串字面量是语法错误（"语句未结束"），必须是一个参数。
-#[cfg(windows)]
-fn silent_launcher(inner_cmd: &str, inner_args: &[&str]) -> String {
-    let mut inner = format!("\"{}\"", inner_cmd);
-    for a in inner_args {
-        inner.push(' ');
-        inner.push_str(&format!("\"{}\"", a));
-    }
-    format!(
-        "' wan schedule run-once silent launcher (wscript, no console window)\r\n\
-         Dim sh\r\n\
-         Set sh = CreateObject(\"WScript.Shell\")\r\n\
-         sh.Run {}, 0, False\r\n",
-        vbs_string_literal(&inner)
-    )
-}
-
-#[cfg(windows)]
 fn install_windows(base: &Path) -> Result<()> {
     let exe = self_exe()?;
     let base_str = base.to_string_lossy();
     let dir = crate::schedule::schedules_dir(base);
     std::fs::create_dir_all(&dir)?;
 
-    // 旧版 wrapper bat（兼容移除逻辑与新逻辑的差异：bat 闪窗，vbs 静默）
-    let bat_path = dir.join("run-once.bat");
-    let bat_content = format!(
-        "@echo off\r\n\"{}\" schedule run-once -C \"{}\"\r\n",
-        exe.display(),
-        base_str
-    );
-    std::fs::write(&bat_path, bat_content)?;
-
-    // vbs 无窗口启动器：wscript 宿主本身无控制台，Run 的 window style=0 隐藏子进程窗口
-    let vbs_path = dir.join("run-once.vbs");
-    let vbs_content = silent_launcher(
-        &exe.to_string_lossy(),
-        &["schedule", "run-once", "-C", &base_str],
-    );
-    std::fs::write(&vbs_path, vbs_content)?;
+    // 清理旧版遗留的 vbs/bat wrapper（若存在）
+    for legacy in ["run-once.vbs", "run-once.bat"] {
+        let p = dir.join(legacy);
+        if p.exists() {
+            let _ = std::fs::remove_file(&p);
+        }
+    }
 
     let task = task_name(base);
 
-    // schtasks /Create /TN <task> /TR "<vbs path>" /SC MINUTE /MO 1 /IT /F
-    //  - /IT：仅登录时运行。否则任务在"任何用户"下运行，vbs 的窗口隐藏
-    //    只对启动它的会话生效，登录桌面会话下仍可能闪窗；/IT 让任务在
-    //    当前登录用户会话内启动，与交互桌面一致，始终不弹窗。
-    //  - 不做 /RU SYSTEM：无窗口 + 无需管理员权限（静默启动仅需当前用户权限）。
+    // schtasks /TR 指向 wan-shim.exe（GUI 子系统，无控制台窗口）
+    // shim 以 CREATE_NO_WINDOW 启动 wan.exe schedule run-once -C <base>
+    // 构造命令行：wan-shim.exe "<wan-exe>" schedule run-once -C "<base>"
+    let shim = shim_path()?;
+    let tr = format!(
+        "\"{}\" \"{}\" schedule run-once -C \"{}\"",
+        shim.display(),
+        exe.display(),
+        base_str
+    );
+
+    //  - /IT：仅登录时运行，确保任务在当前登录用户会话内启动，与交互桌面一致。
+    //  - 不做 /RU SYSTEM：无窗口 + 无需管理员权限。
     let output = std::process::Command::new("schtasks")
         .args([
             "/Create",
             "/TN",
             &task,
             "/TR",
-            &vbs_path.to_string_lossy(),
+            &tr,
             "/SC",
             "MINUTE",
             "/MO",
@@ -481,51 +455,15 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn silent_launcher_contains_inner_command() {
-        // 启动器必须包含完整的内层命令（含引号转义），确保 wscript 能正确执行
-        let vbs = silent_launcher(
-            r"C:\Dev\Projects\wan\target\release\wan.exe",
-            &["schedule", "run-once", "-C", r"C:\Dev\Projects\Baafoo\."],
-        );
-        assert!(vbs.contains(r#"C:\Dev\Projects\wan\target\release\wan.exe"#));
-        assert!(vbs.contains("schedule"));
-        assert!(vbs.contains("run-once"));
-        assert!(vbs.contains(r#"C:\Dev\Projects\Baafoo\."#));
-        // 必须是 wscript 宿主 + 隐藏窗口（0 = 不显示窗口）
-        assert!(vbs.contains("WScript.Shell"));
-        assert!(vbs.contains(", 0, False"));
-        // 必须是 CRLF 行尾（Windows 脚本）
-        assert!(vbs.contains("\r\n"));
-    }
-
-    #[cfg(windows)]
-    #[test]
-    fn silent_launcher_builds_single_command_string() {
-        // 整条命令必须是单个 VBS 字符串字面量（VBS 相邻字符串字面量是语法错误）
-        let vbs = silent_launcher(
-            r"C:\Dev Projects\wan.exe",
-            &["schedule", "run-once", "-C", r"C:\Dev Projects\proj"],
-        );
-        let run_line = vbs.lines().find(|l| l.contains("sh.Run")).unwrap();
-        // 以转义后的字面双引号开头（""" = VBS 字符串内的一个双引号）
-        assert!(run_line.contains("sh.Run \"\"\""), "命令应为单个字符串: {run_line}");
-        // 剥掉所有转义双引号（"" → 空）后应恰好剩 2 个引号（开+闭）：
-        // 整个参数是单个字面量；若为相邻字面量（"a" "b"）会剩 4 个以上
-        let arg = run_line
-            .trim_start_matches("sh.Run ")
-            .trim_end_matches(", 0, False")
-            .trim();
-        let collapsed = arg.replace("\"\"", "");
-        assert_eq!(
-            collapsed.matches('"').count(),
-            2,
-            "应为单个字符串字面量: {run_line}"
-        );
-        // 参数完整保留
-        assert!(run_line.contains("schedule") && run_line.contains("run-once"));
-        assert!(run_line.contains("-C") && run_line.contains(r"C:\Dev Projects\proj"));
-        // 窗口样式 0（隐藏）+ 异步，结尾固定
-        assert!(run_line.trim_end().ends_with(", 0, False"));
+    fn shim_path_finds_adjacent_shim() {
+        // shim_path 应在 exe 同目录下查找 wan-shim.exe
+        let exe = self_exe().unwrap();
+        let dir = exe.parent().unwrap();
+        let expected = dir.join("wan-shim.exe");
+        match shim_path() {
+            Ok(p) => assert_eq!(p, expected),
+            Err(_) => assert!(!expected.exists(), "shim 存在但 shim_path 返回 Err"),
+        }
     }
 
     #[cfg(unix)]
