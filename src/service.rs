@@ -156,20 +156,21 @@ fn vbs_string_literal(s: &str) -> String {
 
 /// Windows: 生成无窗口启动器。schtasks 的 /TR 若直接指向 .bat/.exe，
 /// 会在桌面闪一个 cmd 窗口；包一层 .vbs（wscript 宿主，无控制台）彻底静默。
-/// 内层命令含绝对路径（可含空格），所有字面量经 vbs_string_literal 转义。
+/// 内层命令拼成单个字符串（含引号），整体经 vbs_string_literal 转义——
+/// VBS 中相邻字符串字面量是语法错误（"语句未结束"），必须是一个参数。
 #[cfg(windows)]
 fn silent_launcher(inner_cmd: &str, inner_args: &[&str]) -> String {
-    let mut inner = vbs_string_literal(inner_cmd);
+    let mut inner = format!("\"{}\"", inner_cmd);
     for a in inner_args {
         inner.push(' ');
-        inner.push_str(&vbs_string_literal(a));
+        inner.push_str(&format!("\"{}\"", a));
     }
     format!(
         "' wan schedule run-once silent launcher (wscript, no console window)\r\n\
          Dim sh\r\n\
          Set sh = CreateObject(\"WScript.Shell\")\r\n\
-         sh.Run {inner}, 0, False\r\n",
-        inner = inner
+         sh.Run {}, 0, False\r\n",
+        vbs_string_literal(&inner)
     )
 }
 
@@ -499,15 +500,32 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
-    fn silent_launcher_escapes_inner_quotes() {
-        // 路径含空格时，内层命令以引号包裹；引号必须转义为 VBS 字符串字面量
+    fn silent_launcher_builds_single_command_string() {
+        // 整条命令必须是单个 VBS 字符串字面量（VBS 相邻字符串字面量是语法错误）
         let vbs = silent_launcher(
             r"C:\Dev Projects\wan.exe",
             &["schedule", "run-once", "-C", r"C:\Dev Projects\proj"],
         );
-        assert!(vbs.contains(r#"C:\Dev Projects\wan.exe"#));
-        // 内层双引号必须以 VBS 字符串转义形式存在（"" 表示一个字面双引号）
-        assert!(vbs.contains(r#"""C:\Dev Projects\wan.exe"""#));
+        let run_line = vbs.lines().find(|l| l.contains("sh.Run")).unwrap();
+        // 以转义后的字面双引号开头（""" = VBS 字符串内的一个双引号）
+        assert!(run_line.contains("sh.Run \"\"\""), "命令应为单个字符串: {run_line}");
+        // 剥掉所有转义双引号（"" → 空）后应恰好剩 2 个引号（开+闭）：
+        // 整个参数是单个字面量；若为相邻字面量（"a" "b"）会剩 4 个以上
+        let arg = run_line
+            .trim_start_matches("sh.Run ")
+            .trim_end_matches(", 0, False")
+            .trim();
+        let collapsed = arg.replace("\"\"", "");
+        assert_eq!(
+            collapsed.matches('"').count(),
+            2,
+            "应为单个字符串字面量: {run_line}"
+        );
+        // 参数完整保留
+        assert!(run_line.contains("schedule") && run_line.contains("run-once"));
+        assert!(run_line.contains("-C") && run_line.contains(r"C:\Dev Projects\proj"));
+        // 窗口样式 0（隐藏）+ 异步，结尾固定
+        assert!(run_line.trim_end().ends_with(", 0, False"));
     }
 
     #[cfg(unix)]
