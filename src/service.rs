@@ -10,6 +10,8 @@
 //! - 任务名/unit 名含项目路径哈希（WanSchedule-<hash8> / wan-schedule-<hash8>），
 //!   同机多项目分别 setup 时互不覆盖
 //! - 旧版使用固定名 WanSchedule / wan-schedule，install/remove 时顺带清理
+//! - Windows 下 run-once 通过 `.vbs` 隐藏窗口启动（schtasks 直接跑 bat 会闪 cmd 窗口），
+//!   任务注册为 "仅登录时运行"（/IT）——不同用户会话下可见性一致，均不弹窗
 
 use std::path::{Path, PathBuf};
 
@@ -130,35 +132,90 @@ pub fn status(base: &Path) -> Result<String> {
 #[cfg(windows)]
 const LEGACY_TASK_NAME: &str = "WanSchedule";
 
+/// VBS 字符串字面量转义：双引号翻倍（VBS 字符串内用 `""` 表示一个字面双引号），
+/// 换行/制表符转成 VBS 转义序列（Chr 不可用于单行 sh.Run 参数，且 0/False 字面量
+/// 已固定，不需处理非 ASCII——路径均为 Rust String 的 UTF-8，VBS 以系统 ANSI 解析，
+/// 中文路径可能乱码，因此转成 ANSI 直写有风险，这里对非 ASCII 转 Chr 序列拼接）。
+#[cfg(windows)]
+fn vbs_string_literal(s: &str) -> String {
+    let mut out = String::from("\"");
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\"\""),
+            '\r' => {}
+            '\n' => out.push_str("\" & vbCrLf & \""),
+            '\t' => out.push_str("\" & vbTab & \""),
+            c if (c as u32) < 32 => out.push_str(&format!("\" & Chr({}) & \"", c as u32)),
+            c if (c as u32) < 128 => out.push(c),
+            c => out.push_str(&format!("\" & ChrW({}) & \"", c as u32)),
+        }
+    }
+    out.push('\"');
+    out
+}
+
+/// Windows: 生成无窗口启动器。schtasks 的 /TR 若直接指向 .bat/.exe，
+/// 会在桌面闪一个 cmd 窗口；包一层 .vbs（wscript 宿主，无控制台）彻底静默。
+/// 内层命令含绝对路径（可含空格），所有字面量经 vbs_string_literal 转义。
+#[cfg(windows)]
+fn silent_launcher(inner_cmd: &str, inner_args: &[&str]) -> String {
+    let mut inner = vbs_string_literal(inner_cmd);
+    for a in inner_args {
+        inner.push(' ');
+        inner.push_str(&vbs_string_literal(a));
+    }
+    format!(
+        "' wan schedule run-once silent launcher (wscript, no console window)\r\n\
+         Dim sh\r\n\
+         Set sh = CreateObject(\"WScript.Shell\")\r\n\
+         sh.Run {inner}, 0, False\r\n",
+        inner = inner
+    )
+}
+
 #[cfg(windows)]
 fn install_windows(base: &Path) -> Result<()> {
     let exe = self_exe()?;
     let base_str = base.to_string_lossy();
+    let dir = crate::schedule::schedules_dir(base);
+    std::fs::create_dir_all(&dir)?;
 
-    // 创建 wrapper bat 文件（schtasks /TR 对含空格和参数的命令处理不可靠）
-    let bat_path = crate::schedule::schedules_dir(base).join("run-once.bat");
+    // 旧版 wrapper bat（兼容移除逻辑与新逻辑的差异：bat 闪窗，vbs 静默）
+    let bat_path = dir.join("run-once.bat");
     let bat_content = format!(
         "@echo off\r\n\"{}\" schedule run-once -C \"{}\"\r\n",
         exe.display(),
         base_str
     );
-    std::fs::create_dir_all(crate::schedule::schedules_dir(base))?;
     std::fs::write(&bat_path, bat_content)?;
+
+    // vbs 无窗口启动器：wscript 宿主本身无控制台，Run 的 window style=0 隐藏子进程窗口
+    let vbs_path = dir.join("run-once.vbs");
+    let vbs_content = silent_launcher(
+        &exe.to_string_lossy(),
+        &["schedule", "run-once", "-C", &base_str],
+    );
+    std::fs::write(&vbs_path, vbs_content)?;
 
     let task = task_name(base);
 
-    // schtasks /Create /TN <task> /TR "<bat path>" /SC MINUTE /MO 1 /F
+    // schtasks /Create /TN <task> /TR "<vbs path>" /SC MINUTE /MO 1 /IT /F
+    //  - /IT：仅登录时运行。否则任务在"任何用户"下运行，vbs 的窗口隐藏
+    //    只对启动它的会话生效，登录桌面会话下仍可能闪窗；/IT 让任务在
+    //    当前登录用户会话内启动，与交互桌面一致，始终不弹窗。
+    //  - 不做 /RU SYSTEM：无窗口 + 无需管理员权限（静默启动仅需当前用户权限）。
     let output = std::process::Command::new("schtasks")
         .args([
             "/Create",
             "/TN",
             &task,
             "/TR",
-            &bat_path.to_string_lossy(),
+            &vbs_path.to_string_lossy(),
             "/SC",
             "MINUTE",
             "/MO",
             "1",
+            "/IT",
             "/F",
         ])
         .output()
@@ -419,6 +476,38 @@ mod tests {
             .chars()
             .all(|c| c.is_ascii_hexdigit()));
         assert_eq!(name.len(), "WanSchedule-".len() + 8);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn silent_launcher_contains_inner_command() {
+        // 启动器必须包含完整的内层命令（含引号转义），确保 wscript 能正确执行
+        let vbs = silent_launcher(
+            r"C:\Dev\Projects\wan\target\release\wan.exe",
+            &["schedule", "run-once", "-C", r"C:\Dev\Projects\Baafoo\."],
+        );
+        assert!(vbs.contains(r#"C:\Dev\Projects\wan\target\release\wan.exe"#));
+        assert!(vbs.contains("schedule"));
+        assert!(vbs.contains("run-once"));
+        assert!(vbs.contains(r#"C:\Dev\Projects\Baafoo\."#));
+        // 必须是 wscript 宿主 + 隐藏窗口（0 = 不显示窗口）
+        assert!(vbs.contains("WScript.Shell"));
+        assert!(vbs.contains(", 0, False"));
+        // 必须是 CRLF 行尾（Windows 脚本）
+        assert!(vbs.contains("\r\n"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn silent_launcher_escapes_inner_quotes() {
+        // 路径含空格时，内层命令以引号包裹；引号必须转义为 VBS 字符串字面量
+        let vbs = silent_launcher(
+            r"C:\Dev Projects\wan.exe",
+            &["schedule", "run-once", "-C", r"C:\Dev Projects\proj"],
+        );
+        assert!(vbs.contains(r#"C:\Dev Projects\wan.exe"#));
+        // 内层双引号必须以 VBS 字符串转义形式存在（"" 表示一个字面双引号）
+        assert!(vbs.contains(r#"""C:\Dev Projects\wan.exe"""#));
     }
 
     #[cfg(unix)]
