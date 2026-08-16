@@ -150,6 +150,7 @@ fn shim_path() -> Result<PathBuf> {
     }
     Ok(shim)
 }
+#[cfg(windows)]
 fn install_windows(base: &Path) -> Result<()> {
     let exe = self_exe()?;
     let base_str = base.to_string_lossy();
