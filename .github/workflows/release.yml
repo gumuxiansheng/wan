@@ -64,12 +64,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/release/wan.exe dist/wan-windows-amd64.exe
+          Copy-Item target/release/wan-shim.exe dist/wan-shim-windows-amd64.exe
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: wan-windows-amd64
-          path: dist/wan-windows-amd64.exe
+          path: dist/*
 
   release:
     name: Publish GitHub Release
