@@ -108,6 +108,8 @@ pub struct RunOptions {
     pub json_output: bool,
     pub quiet: bool,
     pub color: bool,
+    /// true 时禁用并行分组：并行 job 输出实时直通（允许穿插，旧行为）
+    pub no_group: bool,
 }
 
 use serde::Serialize;

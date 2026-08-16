@@ -15,7 +15,7 @@ const USAGE: &str = "\
 wan — 本地工作流执行器
 
 用法:
-  wan run <file|name> [--json] [--max-parallel N] [--quiet] [--no-color] [-C <dir>]
+  wan run <file|name> [--json] [--max-parallel N] [--quiet] [--no-color] [--no-group] [-C <dir>]
   wan validate <file|name> [-C <dir>]
   wan list [-C <dir>]
   wan graph <file|name> [-C <dir>]
@@ -25,8 +25,8 @@ wan — 本地工作流执行器
   wan schedule add <id> <cron-expr> <workflow> [-C <dir>]
   wan schedule remove <id> [-C <dir>]
   wan schedule list [-C <dir>]
-  wan schedule start [-C <dir>] [--catch-up] [--json] [--quiet] [--no-color]
-  wan schedule run-once [-C <dir>] [--json] [--quiet] [--no-color]
+  wan schedule start [-C <dir>] [--catch-up] [--json] [--quiet] [--no-color] [--no-group]
+  wan schedule run-once [-C <dir>] [--json] [--quiet] [--no-color] [--no-group]
   wan schedule service install|remove|status [-C <dir>]
   wan schedule history [<id>] [-C <dir>] [--limit N]
   wan --version
@@ -58,6 +58,7 @@ wan — 本地工作流执行器
   --max-parallel N  job 并行上限（默认无上限）
   --quiet           抑制 step 输出（与 --json 同用时无效）
   --no-color        禁用颜色
+  --no-group        禁用并行分组（并行 job 输出实时直通，允许穿插）
   -C <dir>          工作目录（默认当前目录）
 
 退出码: 0 成功 / 1 执行失败 / 2 配置错误 / 130 中断
@@ -78,6 +79,7 @@ struct Flags {
     json: bool,
     quiet: bool,
     color: bool,
+    no_group: bool,
     max_parallel: Option<usize>,
     cwd: Option<PathBuf>,
 }
@@ -88,6 +90,7 @@ impl Default for Flags {
             json: false,
             quiet: false,
             color: true,
+            no_group: false,
             max_parallel: None,
             cwd: None,
         }
@@ -201,6 +204,7 @@ fn parse_common_flags(parser: &mut lexopt::Parser, flags: &mut Flags) -> Result<
             Long("json") => flags.json = true,
             Long("quiet") => flags.quiet = true,
             Long("no-color") => flags.color = false,
+            Long("no-group") => flags.no_group = true,
             Short('C') => {
                 let v = take_value(parser, "-C")?;
                 let p = PathBuf::from(v);
@@ -256,6 +260,7 @@ fn cmd_run(parser: lexopt::Parser) -> Result<i32> {
         json_output: flags.json,
         quiet: flags.quiet,
         color: flags.color,
+        no_group: flags.no_group,
     };
 
     let sink: Box<dyn crate::model::EventSink + Send> = if flags.json {
@@ -468,6 +473,7 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
     let mut json_output = false;
     let mut quiet = false;
     let mut color = true;
+    let mut no_group = false;
     let mut catch_up = false;
     let mut limit: usize = 20;
     let mut positional: Vec<String> = Vec::new();
@@ -487,6 +493,7 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
             Long("json") => json_output = true,
             Long("quiet") => quiet = true,
             Long("no-color") => color = false,
+            Long("no-group") => no_group = true,
             Long("catch-up") => catch_up = true,
             Long("limit") => {
                 let v = take_value(&mut parser, "--limit")?;
@@ -573,6 +580,7 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
                 json_output,
                 quiet,
                 color,
+                no_group,
             };
             crate::schedule::run_daemon(&base, catch_up, None, &opts)
         }
@@ -584,6 +592,7 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
                 json_output,
                 quiet,
                 color,
+                no_group,
             };
             crate::schedule::run_once(&base, &opts)
         }
@@ -665,6 +674,19 @@ mod tests {
             "cwd: {}",
             cwd.display()
         );
+        assert_eq!(file, Some(PathBuf::from("a.yml")));
+    }
+
+    #[test]
+    fn no_group_flag_parse() {
+        let mut parser = lexopt::Parser::from_iter(vec![
+            "wan".to_string(),
+            "--no-group".to_string(),
+            "a.yml".to_string(),
+        ]);
+        let mut flags = Flags::default();
+        let file = parse_common_flags(&mut parser, &mut flags).unwrap();
+        assert!(flags.no_group, "no_group flag not set");
         assert_eq!(file, Some(PathBuf::from("a.yml")));
     }
 

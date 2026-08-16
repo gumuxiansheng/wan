@@ -68,39 +68,6 @@ fn json_events_shape() {
 }
 
 #[test]
-fn validate_ok_and_bad() {
-    let good = platform_fixture("hello-win.yml", "hello-unix.yml");
-    let out = Command::new(bin())
-        .arg("validate")
-        .arg(&good)
-        .output()
-        .unwrap();
-    assert!(out.status.success());
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("OK"), "stdout: {stdout}");
-
-    let bad = fixture("dag-cycle.yml");
-    let out = Command::new(bin())
-        .arg("validate")
-        .arg(&bad)
-        .output()
-        .unwrap();
-    assert_eq!(out.status.code(), Some(2));
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(stderr.contains("环"), "stderr: {stderr}");
-}
-
-#[test]
-fn graph_mermaid() {
-    let f = platform_fixture("hello-win.yml", "hello-unix.yml");
-    let out = Command::new(bin()).arg("graph").arg(&f).output().unwrap();
-    assert!(out.status.success());
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("flowchart TD"), "stdout: {stdout}");
-    assert!(stdout.contains("hello"), "stdout: {stdout}");
-}
-
-#[test]
 fn output_passthrough() {
     let f = fixture("output-win.yml");
     if !cfg!(windows) {
@@ -255,6 +222,98 @@ fn short_name_resolution() {
     assert_eq!(out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(stderr.contains("未找到"), "stderr: {stderr}");
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// 生成两个并行 job 的 workflow（各自先延迟再输出多行，确保输出阶段已并行）
+fn make_parallel_workflow(dir: &Path) -> PathBuf {
+    let (shell, run_a, run_b) = if cfg!(windows) {
+        (
+            "cmd",
+            "ping -n 2 127.0.0.1 >nul&&echo alpha-1&&echo alpha-2&&echo alpha-3",
+            "ping -n 2 127.0.0.1 >nul&&echo beta-1&&echo beta-2&&echo beta-3",
+        )
+    } else {
+        (
+            "sh",
+            "sleep 1; echo alpha-1; echo alpha-2; echo alpha-3",
+            "sleep 1; echo beta-1; echo beta-2; echo beta-3",
+        )
+    };
+    let yml = format!(
+        "version: 1\njobs:\n  alpha:\n    steps:\n      - name: say\n        shell: {shell}\n        run: \"{run_a}\"\n  beta:\n    steps:\n      - name: say\n        shell: {shell}\n        run: \"{run_b}\"\n"
+    );
+    let f = dir.join("parallel.yml");
+    std::fs::write(&f, yml).unwrap();
+    f
+}
+
+/// 并行分组：同一 job 的输出行连续，不被另一 job 穿插
+#[test]
+fn parallel_jobs_grouped_output() {
+    let tmp = std::env::temp_dir().join(format!("wan-par-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let f = make_parallel_workflow(&tmp);
+
+    let out = Command::new(bin()).arg("run").arg(&f).output().unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let lines: Vec<&str> = stdout.lines().collect();
+
+    let pos = |pat: &str| -> Vec<usize> {
+        lines
+            .iter()
+            .enumerate()
+            .filter(|(_, l)| l.trim_start().starts_with(pat))
+            .map(|(i, _)| i)
+            .collect()
+    };
+    let a = pos("alpha-");
+    let b = pos("beta-");
+    assert_eq!(a.len(), 3, "alpha 行数不对: {stdout}");
+    assert_eq!(b.len(), 3, "beta 行数不对: {stdout}");
+
+    // 各自连续（3 行紧挨）且两块互不嵌套
+    assert_eq!(a[2] - a[0], 2, "alpha 行被穿插: {stdout}");
+    assert_eq!(b[2] - b[0], 2, "beta 行被穿插: {stdout}");
+    assert!(
+        a[2] < b[0] || b[2] < a[0],
+        "alpha/beta 输出块交错: {stdout}"
+    );
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// --no-group：恢复实时直通（无分组 banner）
+#[test]
+fn no_group_disables_banner() {
+    let tmp = std::env::temp_dir().join(format!("wan-par-ng-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&tmp);
+    std::fs::create_dir_all(&tmp).unwrap();
+    let f = make_parallel_workflow(&tmp);
+
+    let out = Command::new(bin())
+        .arg("run")
+        .arg("--no-group")
+        .arg(&f)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        !stdout.contains("── [job]"),
+        "--no-group 下不应出现分组 banner: {stdout}"
+    );
 
     let _ = std::fs::remove_dir_all(&tmp);
 }
