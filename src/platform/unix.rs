@@ -84,7 +84,7 @@ pub fn install_interrupt_handler() {
     }
     // 使用 sigaction 而非 signal（POSIX 推荐，行为更可移植）
     let mut sa: libc::sigaction = unsafe { std::mem::zeroed() };
-    sa.sa_sigaction = handler as usize;
+    sa.sa_sigaction = handler as *const () as usize;
     sa.sa_flags = libc::SA_RESTART;
     unsafe {
         libc::sigaction(libc::SIGINT, &sa, std::ptr::null_mut());
