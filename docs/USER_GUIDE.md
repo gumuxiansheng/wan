@@ -640,13 +640,15 @@ wan schedule run-once [-C <dir>] [--json] [--quiet] [--no-color]
 
 ```bash
 wan schedule service install [-C <dir>]
-wan schedule service remove
-wan schedule service status
+wan schedule service remove [-C <dir>]
+wan schedule service status [-C <dir>]
 ```
 
 **Windows**:注册 schtasks 定时任务(每分钟触发 `wan schedule run-once`)。
 
-**Linux**:安装 systemd user unit(`wan-schedule.service` + `wan-schedule.timer`,每分钟触发)。
+**Linux**:安装 systemd user unit(`wan-schedule-<hash>.service` + `.timer`,每分钟触发)。
+
+任务名/unit 名含项目路径哈希(如 `WanSchedule-a1b2c3d4`),同一台机器上多个项目可分别安装、互不覆盖。`remove`/`status` 需在对应项目目录(或用 `-C` 指定)执行,以定位到本项目的任务。旧版固定名任务(`WanSchedule` / `wan-schedule`)会在 install/remove 时自动清理。
 
 ### 14.7 查看执行历史
 

@@ -604,18 +604,24 @@ fn cmd_schedule(parser: lexopt::Parser) -> Result<i32> {
                     crate::service::install(&base)?;
                     println!("已安装系统服务。");
                     #[cfg(windows)]
-                    println!("Windows schtasks 任务名：WanSchedule（每分钟触发）");
+                    println!(
+                        "Windows schtasks 任务名：{}（每分钟触发）",
+                        crate::service::task_name(&base)
+                    );
                     #[cfg(unix)]
-                    println!("systemd user unit：wan-schedule.timer（每分钟触发）");
+                    println!(
+                        "systemd user unit：{}.timer（每分钟触发）",
+                        crate::service::unit_name(&base)
+                    );
                     Ok(0)
                 }
                 "remove" => {
-                    crate::service::remove()?;
+                    crate::service::remove(&base)?;
                     println!("已移除系统服务。");
                     Ok(0)
                 }
                 "status" => {
-                    let s = crate::service::status()?;
+                    let s = crate::service::status(&base)?;
                     println!("{s}");
                     Ok(0)
                 }
