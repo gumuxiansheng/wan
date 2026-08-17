@@ -41,10 +41,7 @@ mod shim {
         let wan_args: Vec<OsString> = args.into_iter().skip(1).collect();
 
         if !wan_exe.exists() {
-            log_to_event_log(&format!(
-                "wan-shim: wan.exe 不存在: {}",
-                wan_exe.display()
-            ));
+            log_to_event_log(&format!("wan-shim: wan.exe 不存在: {}", wan_exe.display()));
             return 2;
         }
 
@@ -55,11 +52,7 @@ mod shim {
         match cmd.status() {
             Ok(status) => status.code().unwrap_or(1),
             Err(e) => {
-                log_to_event_log(&format!(
-                    "wan-shim: 启动 {} 失败: {}",
-                    wan_exe.display(),
-                    e
-                ));
+                log_to_event_log(&format!("wan-shim: 启动 {} 失败: {}", wan_exe.display(), e));
                 1
             }
         }

@@ -66,7 +66,10 @@ fn normalized_base(base: &Path) -> PathBuf {
 /// 项目路径哈希（FNV-1a 低 32 位，8 位 hex）
 fn base_hash(base: &Path) -> String {
     let normalized = normalized_base(base);
-    format!("{:08x}", fnv1a(normalized.to_string_lossy().as_bytes()) as u32)
+    format!(
+        "{:08x}",
+        fnv1a(normalized.to_string_lossy().as_bytes()) as u32
+    )
 }
 
 /// Windows: schtasks 任务名（含项目哈希，多项目并存）
@@ -182,17 +185,7 @@ fn install_windows(base: &Path) -> Result<()> {
     //  - 不做 /RU SYSTEM：无窗口 + 无需管理员权限。
     let output = std::process::Command::new("schtasks")
         .args([
-            "/Create",
-            "/TN",
-            &task,
-            "/TR",
-            &tr,
-            "/SC",
-            "MINUTE",
-            "/MO",
-            "1",
-            "/IT",
-            "/F",
+            "/Create", "/TN", &task, "/TR", &tr, "/SC", "MINUTE", "/MO", "1", "/IT", "/F",
         ])
         .output()
         .map_err(|e| Error::io(format!("执行 schtasks 失败：{e}")))?;
@@ -358,7 +351,12 @@ fn install_linux(base: &Path) -> Result<()> {
 #[cfg(unix)]
 fn remove_legacy_linux() {
     let _ = std::process::Command::new("systemctl")
-        .args(["--user", "disable", "--now", &format!("{LEGACY_UNIT}.timer")])
+        .args([
+            "--user",
+            "disable",
+            "--now",
+            &format!("{LEGACY_UNIT}.timer"),
+        ])
         .output();
     if let Ok(dir) = systemd_user_dir() {
         let _ = std::fs::remove_file(dir.join(format!("{LEGACY_UNIT}.timer")));
